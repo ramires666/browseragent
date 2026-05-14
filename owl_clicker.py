@@ -24,15 +24,20 @@ def _get_window_position(page):
 
 
 def viewport_to_screen(page, vx, vy):
-    """Конвертирует координаты viewport (vx, vy) в абсолютные экранные координаты."""
+    """Конвертирует координаты viewport (vx, vy) в абсолютные экранные координаты.
+
+    Исправление: top_chrome = outerH - innerH - bottom_border.
+    На Windows border толщина одинакова со всех сторон,
+    поэтому bottom_border = left_border = (outerW - innerW) / 2.
+    """
     info = _get_window_position(page)
     w_diff = info["outerW"] - info["innerW"]
     h_diff = info["outerH"] - info["innerH"]
 
-    left_chrome = w_diff // 2
-    top_chrome = h_diff
+    border_w = w_diff // 2
+    top_chrome = h_diff - border_w
 
-    sx = info["screenX"] + left_chrome + vx
+    sx = info["screenX"] + border_w + vx
     sy = info["screenY"] + top_chrome + vy
     return int(sx), int(sy)
 

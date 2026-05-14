@@ -169,6 +169,78 @@ def detect_captcha(page, elements):
     return False
 
 
+VISION_VERIFY_PROMPT = """
+You see a screenshot taken AFTER performing this action: {action}
+
+Look at the screenshot carefully and verify if the action succeeded.
+- For a click: is the target element now activated/selected/focused?
+- For typing: does the input field contain the typed text?
+- For pressing a key: did the expected change happen?
+
+Return ONLY valid JSON:
+{"ok":true,"reason":"the element is now focused"}
+or
+{"ok":false,"reason":"the click missed, element is not focused"}
+"""
+
+
+def verify_action_via_screenshot(page, action):
+    """После выполнения действия делает скриншот и спрашивает LLM, сработало ли."""
+    import base64
+    import requests
+    from owl_llm import API_URL, API_KEY
+    from owl_llm import SCREENSHOT_PATH
+
+    time.sleep(0.8)
+    page.screenshot(path=SCREENSHOT_PATH, type="jpeg", quality=85, full_page=False)
+
+    with open(SCREENSHOT_PATH, "rb") as f:
+        image_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+    viewport = page.viewport_size
+    prompt = VISION_VERIFY_PROMPT.format(action=json.dumps(action, ensure_ascii=False))
+
+    payload = {
+        "model": "gui-owl",
+        "messages": [
+            {"role": "system", "content": prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"Verify action: {json.dumps(action, ensure_ascii=False)}"},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
+                ]
+            }
+        ],
+        "temperature": 0.1,
+        "max_tokens": 200,
+        "stream": False,
+    }
+
+    headers = {}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
+
+    try:
+        r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
+        r.raise_for_status()
+        msg = r.json()["choices"][0]["message"]
+        raw = (msg.get("content") or msg.get("reasoning_content") or "").strip()
+        print(f"[VERIFY RAW] {raw[:300]}")
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError:
+            brace = raw.find("{")
+            if brace >= 0:
+                result = json.loads(raw[brace:])
+            else:
+                raise
+        return result.get("ok", False), result.get("reason", "")
+    except Exception as e:
+        print(f"[VERIFY ERROR] {e}")
+        return True, "verify failed, assume ok"
+
+
 VISION_FALLBACK_PROMPT = """
 You see a screenshot of a browser. The system needs to perform an action but cannot find the target element in the DOM.
 
@@ -281,6 +353,10 @@ def do_action(page, action, elements):
         if coords:
             print(f"[PYAUTOGUI] click {el_id} at viewport ({coords[0]}, {coords[1]})")
             click_human_like(page, coords[0], coords[1])
+            ok, reason = verify_action_via_screenshot(page, action)
+            if not ok:
+                print(f"[VERIFY] Click не сработал: {reason}. Пробую vision fallback...")
+                vision_fallback(page, action, elements, action_label=f"click {el_id}")
         else:
             print(f"[PYAUTOGUI] Element {el_id} not in DOM — vision fallback...")
             ok = vision_fallback(page, action, elements, action_label=f"click {el_id}")
@@ -298,6 +374,13 @@ def do_action(page, action, elements):
             click_human_like(page, coords[0], coords[1])
             time.sleep(0.5)
             type_fallback(page, text)
+            ok, reason = verify_action_via_screenshot(page, action)
+            if not ok:
+                print(f"[VERIFY] Type не сработал: {reason}. Пробую vision fallback...")
+                ok2 = vision_fallback(page, action, elements, action_label=f"type into {el_id}")
+                if ok2:
+                    time.sleep(0.5)
+                    type_fallback(page, text)
         else:
             print(f"[PYAUTOGUI] Element {el_id} not in DOM — vision fallback...")
             ok = vision_fallback(page, action, elements, action_label=f"type into {el_id}")

@@ -24,19 +24,19 @@ def _save_cursor():
 
 def _restore_cursor():
     if _SAVED_CURSOR:
-        pyautogui.moveTo(_SAVED_CURSOR.x, _SAVED_CURSOR.y, duration=0.02)
+        pyautogui.moveTo(_SAVED_CURSOR.x, _SAVED_CURSOR.y, duration=random.uniform(0.08, 0.2))
 
 
-def _move_from_saved(dest_x, dest_y, duration=0.15):
-    """Телепорт обратно на сохранённую позицию, затем human-like movement к цели."""
+def _move_from_saved(dest_x, dest_y, duration=0.2):
+    """Плавное human-like движение: от сохранённой позиции к цели."""
     _restore_cursor()
-    time.sleep(0.05)
+    time.sleep(random.uniform(0.03, 0.08))
     pyautogui.moveTo(
         dest_x + random.randint(-40, 40),
         dest_y + random.randint(-40, 40),
         duration=random.uniform(duration * 0.6, duration * 1.2)
     )
-    pyautogui.moveTo(dest_x, dest_y, duration=random.uniform(duration * 0.4, duration * 0.8))
+    pyautogui.moveTo(dest_x, dest_y, duration=random.uniform(duration * 0.3, duration * 0.6))
     _save_cursor()
 
 

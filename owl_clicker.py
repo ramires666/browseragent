@@ -3,6 +3,7 @@ import random
 import pyautogui
 import pygetwindow as gw
 import ctypes
+import keyboard as kb
 
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.1
@@ -140,8 +141,8 @@ def type_fallback(page, text):
     _user32.ClipCursor(None)
     time.sleep(0.1)
 
-    pyautogui.write(text, interval=0.06)
-    time.sleep(0.2)
+    kb.write(text, delay=0.02)
+    time.sleep(0.3)
 
     _set_keyboard_layout("00000409")
     if has_cyrillic:

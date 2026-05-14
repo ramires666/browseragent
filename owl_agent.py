@@ -27,11 +27,78 @@ CAPTCHA_KEYWORDS = [
 ]
 
 
+GOOGLE_BLOCK_KEYWORDS = [
+    "google has blocked", "our systems have detected", "unusual traffic",
+    "sorry...", "automated queries", "this page appears to be automated",
+    "blocked the request", "google blocked"
+]
+
+
 def page_text(page):
     try:
         return page.evaluate("() => document.body?.innerText?.slice(0, 3000) || ''")
     except Exception:
         return ""
+
+
+def detect_google_block(page):
+    text = page_text(page).lower()
+    for kw in GOOGLE_BLOCK_KEYWORDS:
+        if kw in text:
+            print(f"  [GOOGLE BLOCK] триггер: \"{kw}\"")
+            return True
+    return False
+
+
+def handle_google_block(page):
+    print("\n[GOOGLE BLOCK] Обнаружена блокировка Google. Жду 1.5с для загрузки чекбокса...")
+    time.sleep(1.5)
+
+    for attempt in range(3):
+        vx, vy = _find_recaptcha_checkbox(page)
+        if vx is not None:
+            print(f"[GOOGLE BLOCK] reCAPTCHA чекбокс найден, клик через pyautogui (viewport {vx}, {vy})")
+            click_fallback(page, vx, vy)
+            print("[GOOGLE BLOCK] Кликнул. Жду 1.5с...")
+            time.sleep(1.5)
+            print("[GOOGLE BLOCK] Завершено. Перехожу к шагу с капчей.")
+            return True
+        print(f"[GOOGLE BLOCK] reCAPTCHA iframe не найден, попытка {attempt + 1}/3, жду 1с...")
+        time.sleep(1)
+
+    print("[GOOGLE BLOCK] Не удалось найти reCAPTCHA. Пробую кликнуть по центру страницы через pyautogui (нижняя треть)...")
+    page.screenshot(path=SCREENSHOT_PATH, type="jpeg", quality=85, full_page=False)
+
+    text = page_text(page)
+    print(f"[GOOGLE BLOCK] Текст на странице: {text[:500]}")
+    return False
+
+
+def _find_recaptcha_checkbox(page):
+    for frame in page.frames:
+        url = frame.url.lower()
+        if "recaptcha/api2/anchor" in url:
+            el = frame.frame_element()
+            box = el.bounding_box()
+            if box:
+                return (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+
+    locator = page.locator('iframe[src*="recaptcha/api2/anchor"], iframe[title*="recaptcha"], iframe[src*="recaptcha"]')
+    count = locator.count()
+    if count > 0:
+        for i in range(count):
+            box = locator.nth(i).bounding_box()
+            if box:
+                return (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+
+    locator = page.locator('[class*="recaptcha"], [id*="recaptcha"]')
+    count = locator.count()
+    if count > 0:
+        box = locator.first.bounding_box()
+        if box:
+            return (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+
+    return None, None
 
 
 def detect_captcha(page, elements):
@@ -170,6 +237,10 @@ def main():
             print("[ELEMENTS]", len(elements))
             for el in elements[:20]:
                 print(el)
+
+            if detect_google_block(page):
+                handle_google_block(page)
+                continue
 
             page.screenshot(path=SCREENSHOT_PATH, type="jpeg", quality=85, full_page=False)
 

@@ -18,6 +18,7 @@ from owl_clicker import (
     press_fallback,
     find_element_coords
 )
+from owl_task_plans import GOOGLE_SEARCH_PLAN
 from owl_recaptcha import (
     is_recaptcha_challenge,
     ensure_recaptcha_challenge,
@@ -360,7 +361,7 @@ def same_action(a, b):
     return json.dumps(a, sort_keys=True, ensure_ascii=False) == json.dumps(b, sort_keys=True, ensure_ascii=False)
 
 
-def do_action(page, action, elements):
+def do_action(page, action, elements, focused_id=None):
     kind = action.get("action")
     print("[ACTION]", action)
 
@@ -387,10 +388,14 @@ def do_action(page, action, elements):
         text = action["text"]
         coords = find_element_coords(elements, el_id)
         if coords:
-            print(f"[PYAUTOGUI] click + type в {el_id} по DOM координатам ({coords[0]}, {coords[1]})")
-            click_human_like(page, coords[0], coords[1])
-            time.sleep(0.5)
+            if focused_id == el_id:
+                print(f"[PYAUTOGUI] {el_id} уже в фокусе — без клика, сразу печатаю")
+            else:
+                print(f"[PYAUTOGUI] click + type в {el_id} по DOM координатам ({coords[0]}, {coords[1]})")
+                click_human_like(page, coords[0], coords[1])
+                time.sleep(0.5)
             type_fallback(page, text)
+            time.sleep(0.3)
             ok2, reason = verify_action_via_screenshot(page, action)
             if not ok2:
                 print(f"[VERIFY] Текст не ввёлся: {reason}. Пробую ещё раз...")
@@ -538,9 +543,14 @@ def main():
 
             page.screenshot(path=SCREENSHOT_PATH, type="jpeg", quality=85, full_page=False)
 
+            task_with_plan = task
+            task_lower = task.lower()
+            if any(w in task_lower for w in ["найди", "поиск", "гугл", "google", "найди", "search"]):
+                task_with_plan = f"{task}\n\n{GOOGLE_SEARCH_PLAN}"
+
             print(f"\n>>> ОТПРАВЛЯЮ ПРОМПТ | Задача: \"{task}\" | Элементов: {len(elements)} | История: {len(history)} шагов")
             raw = ask_model(
-                task=task,
+                task=task_with_plan,
                 screenshot_path=SCREENSHOT_PATH,
                 elements=elements,
                 current_url=page.url,
@@ -623,7 +633,7 @@ def main():
                 break
 
             try:
-                finished = do_action(page, action, elements)
+                finished = do_action(page, action, elements, focused_id)
             except Exception as e:
                 print("[ERROR] Не удалось выполнить действие даже с fallback")
                 print(e)

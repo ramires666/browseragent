@@ -25,22 +25,19 @@ def _get_window_position(page):
 
 
 def viewport_to_screen(page, vx, vy):
-    """Конвертирует координаты viewport (vx, vy) в абсолютные экранные координаты.
-
-    Исправление: top_chrome = outerH - innerH - bottom_border.
-    На Windows border толщина одинакова со всех сторон,
-    поэтому bottom_border = left_border = (outerW - innerW) / 2.
-    """
     info = _get_window_position(page)
     w_diff = info["outerW"] - info["innerW"]
     h_diff = info["outerH"] - info["innerH"]
-
     border_w = w_diff // 2
     top_chrome = h_diff - border_w
-
     sx = info["screenX"] + border_w + vx
     sy = info["screenY"] + top_chrome + vy
-    return int(sx), int(sy)
+    result = int(sx), int(sy)
+    print(f"[VIEWPORT→SCREEN] viewport=({vx},{vy}) screen=({result[0]},{result[1]}) "
+          f"screenX={info['screenX']} screenY={info['screenY']} "
+          f"outer={info['outerW']}x{info['outerH']} inner={info['innerW']}x{info['innerH']} "
+          f"border_w={border_w} top_chrome={top_chrome}")
+    return result
 
 
 def _focus_browser_window(page):
@@ -50,11 +47,18 @@ def _focus_browser_window(page):
         title = "chrome"
     try:
         windows = gw.getWindowsWithTitle(title)
+        if not windows:
+            windows = gw.getWindowsWithTitle("Chrome")
         if windows:
             win = windows[0]
             if not win.isActive:
                 win.activate()
-            time.sleep(0.3)
+                time.sleep(0.5)
+                if not win.isActive:
+                    win.minimize()
+                    time.sleep(0.1)
+                    win.restore()
+                    time.sleep(0.3)
     except Exception:
         pass
 

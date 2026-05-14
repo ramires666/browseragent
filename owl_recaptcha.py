@@ -246,6 +246,82 @@ def _ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
         return None
 
 
+FIND_CHALLENGE_PROMPT = """
+You are looking at a screenshot of a webpage that may have a reCAPTCHA challenge visible.
+
+The reCAPTCHA challenge looks like a grid of images (3x3 or 4x4) with a text instruction at the top
+like "Select all squares with traffic lights" or similar. There is also a "Verify" or "Skip" button.
+
+Look carefully at the screenshot and determine:
+1. Is a reCAPTCHA image challenge currently visible? (a grid of thumbnails to click)
+2. If YES — return the viewport pixel coordinates of the CENTER of each image tile.
+3. If NO — return {"found": false}
+
+Return exactly this JSON format for YES:
+{"found":true,"clicks":[{"x":100,"y":200},{"x":300,"y":200},{"x":100,"y":350}],"reason":"these 3 have traffic lights"}
+
+Return for NO:
+{"found":false,"reason":"no challenge grid visible"}
+
+Coordinates are in viewport pixels, (0,0) = top-left of the visible browser window.
+"""
+
+
+def find_challenge_via_screenshot(page):
+    """Когда фреймовый поиск не находит challenge, пробуем найти его через скриншот + LLM vision."""
+    print("[RECAPTCHA VISION] Фреймы не помогли — пробую найти challenge через скриншот...")
+    from owl_llm import SCREENSHOT_PATH as FULL_SCREENSHOT_PATH
+    page.screenshot(path=FULL_SCREENSHOT_PATH, type="jpeg", quality=90, full_page=False)
+
+    with open(FULL_SCREENSHOT_PATH, "rb") as f:
+        image_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+    viewport = page.viewport_size
+    w, h = viewport["width"], viewport["height"]
+
+    payload = {
+        "model": "gui-owl",
+        "messages": [
+            {"role": "system", "content": FIND_CHALLENGE_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"Viewport size: {w}x{h}. Is there a reCAPTCHA challenge here?"},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
+                ]
+            }
+        ],
+        "temperature": 0.1,
+        "max_tokens": 500,
+        "stream": False,
+    }
+
+    headers = {}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
+
+    r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
+    r.raise_for_status()
+    raw = r.json()["choices"][0]["message"]["content"]
+    print(f"[RECAPTCHA VISION RAW] {raw}")
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        print(f"[RECAPTCHA VISION] LLM вернула невалидный JSON")
+        return None
+
+
+def detect_recaptcha_via_vision(page):
+    """Проверяет наличие reCAPTCHA challenge через скриншот + LLM. Возвращает True/False."""
+    result = find_challenge_via_screenshot(page)
+    if result and result.get("found"):
+        print("[RECAPTCHA VISION] ✅ challenge найден через скриншот!")
+        return True
+    print("[RECAPTCHA VISION] ❌ challenge не найден через скриншот")
+    return False
+
+
 def _is_solved(page):
     bframe = _find_bframe(page)
     if not bframe:
@@ -314,10 +390,15 @@ def ensure_recaptcha_challenge(page):
         print(f"[RECAPTCHA] Жду {wait_s}с появления challenge...")
         time.sleep(wait_s)
         if is_recaptcha_challenge(page):
-            print("[RECAPTCHA] Challenge появился!")
+            print("[RECAPTCHA] Challenge появился (через фреймы)!")
             return True
 
-    print("[RECAPTCHA] Challenge не появился после клика по чекбоксу")
+    print("[RECAPTCHA] Challenge не найден через фреймы — пробую через скриншот...")
+    if detect_recaptcha_via_vision(page):
+        print("[RECAPTCHA] Challenge найден через скриншот!")
+        return True
+
+    print("[RECAPTCHA] Challenge не обнаружен ни через фреймы, ни через скриншот")
     return False
 
 

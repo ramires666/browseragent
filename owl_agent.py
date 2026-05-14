@@ -22,6 +22,7 @@ from owl_recaptcha import (
     is_recaptcha_challenge,
     ensure_recaptcha_challenge,
     has_recaptcha_on_page,
+    detect_recaptcha_via_vision,
     solve as solve_recaptcha
 )
 
@@ -74,7 +75,11 @@ def handle_google_block(page):
                     print("[GOOGLE BLOCK] Challenge появился!")
                     return True
 
-            print(f"[GOOGLE BLOCK] Challenge не найден после клика (см. RECAPTCHA DEBUG FRAMES выше)")
+            print(f"[GOOGLE BLOCK] Challenge не найден через фреймы — пробую через скриншот...")
+            if detect_recaptcha_via_vision(page):
+                print("[GOOGLE BLOCK] Challenge найден через скриншот!")
+                return True
+
             print(f"[GOOGLE BLOCK] Попытка {attempt + 1}/3")
             continue
 

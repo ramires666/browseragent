@@ -483,74 +483,6 @@ def solve(page, max_rounds=5):
         print(f"[RECAPTCHA] ОТВЕТ LLM: {json.dumps(result, ensure_ascii=False, indent=2)}")
         _wait_step("ОТВЕТ LLM")
 
-        if isinstance(result, list):
-            print("[RECAPTCHA] LLM вернула список — обрабатываю как координаты")
-            clicks_data = []
-            for item in result:
-                if isinstance(item, (list, tuple)) and len(item) == 2:
-                    x, y = int(item[0]), int(item[1])
-                    vx = int(bframe_box["x"]) + x
-                    vy = int(bframe_box["y"]) + y
-                    print(f"[RECAPTCHA] coord({x},{y}) -> viewport({vx},{vy})")
-                    clicks_data.append({"x": vx, "y": vy})
-            if not clicks_data:
-                print("[RECAPTCHA] Нет совпавших плиток/кликов")
-                skip_btn = _get_skip_button(page)
-                if skip_btn:
-                    click_human_like(page, skip_btn[0], skip_btn[1])
-                _random_delay(0.5, 1)
-                continue
-        else:
-            if result.get("done"):
-                print("[RECAPTCHA] LLM: уже решено")
-                return True
-            if result.get("skip"):
-                print("[RECAPTCHA] LLM: пропустить")
-                skip_btn = _get_skip_button(page)
-                if skip_btn:
-                    _wait_step("КЛИК SKIP", f"({skip_btn[0]}, {skip_btn[1]})")
-                    click_human_like(page, skip_btn[0], skip_btn[1])
-                _random_delay(0.5, 1)
-                continue
-
-            raw_clicks = result.get("clicks") or []
-            if raw_clicks and isinstance(raw_clicks[0], dict) and "x" in raw_clicks[0] and "y" in raw_clicks[0]:
-                clicks_data = []
-                for pt in raw_clicks:
-                    vx = int(bframe_box["x"] + pt["x"])
-                    vy = int(bframe_box["y"] + pt["y"])
-                    print(f"[RECAPTCHA] screenshot_click({pt['x']},{pt['y']}) -> viewport({vx},{vy})")
-                    clicks_data.append({"x": vx, "y": vy})
-            else:
-                raw_tiles = _extract_tile_indices(result)
-                if raw_tiles is None:
-                    raw_tiles = []
-                clicks_data = _tiles_to_clicks(raw_tiles, result, bframe_box, page)
-
-            if not clicks_data:
-                print("[RECAPTCHA] Нет совпавших плиток/кликов")
-                skip_btn = _get_skip_button(page)
-                if skip_btn:
-                    click_human_like(page, skip_btn[0], skip_btn[1])
-                _random_delay(0.5, 1)
-                continue
-
-        print(f"[RECAPTCHA] Совпало плиток: {len(clicks_data)}")
-        for i, pt in enumerate(clicks_data):
-            vx, vy = pt["x"], pt["y"]
-            print(f"    {i+1}: viewport({vx},{vy})")
-
-        _wait_step("КЛИКИ ПО ПЛИТКАМ", f"{len(clicks_data)} кликов")
-        for i, pt in enumerate(clicks_data):
-            cx, cy = pt.get("x", 0), pt.get("y", 0)
-            print(f"[RECAPTCHA] Клик {i+1}/{len(clicks_data)} -> ({cx}, {cy})")
-            click_human_like(page, cx, cy)
-            if _debug():
-                _wait_step(f"КЛИК {i+1}")
-            else:
-                _random_delay(0.25, 0.7)
-            continue
-
         if result.get("done"):
             print("[RECAPTCHA] LLM: уже решено")
             return True
@@ -564,41 +496,46 @@ def solve(page, max_rounds=5):
             continue
 
         raw_clicks = result.get("clicks") or []
-        if raw_clicks and isinstance(raw_clicks[0], dict) and "x" in raw_clicks[0] and "y" in raw_clicks[0]:
-            clicks_data = []
-            for pt in raw_clicks:
-                vx = int(bframe_box["x"] + pt["x"])
-                vy = int(bframe_box["y"] + pt["y"])
-                print(f"[RECAPTCHA] screenshot_click({pt['x']},{pt['y']}) -> viewport({vx},{vy})")
-                clicks_data.append({"x": vx, "y": vy})
-        else:
-            raw_tiles = _extract_tile_indices(result)
-            if raw_tiles is None:
-                raw_tiles = []
-            clicks_data = _tiles_to_clicks(raw_tiles, result, bframe_box, page)
-
-        if not clicks_data:
-            print("[RECAPTCHA] Нет совпавших плиток/кликов")
+        if not raw_clicks:
+            print("[RECAPTCHA] Нет совпавших плиток")
             skip_btn = _get_skip_button(page)
             if skip_btn:
                 click_human_like(page, skip_btn[0], skip_btn[1])
             _random_delay(0.5, 1)
             continue
 
-        print(f"[RECAPTCHA] Совпало плиток: {len(clicks_data)}")
-        for i, pt in enumerate(clicks_data):
-            vx, vy = pt["x"], pt["y"]
-            print(f"    {i+1}: viewport({vx},{vy})")
+        clicks_data = []
+        for pt in raw_clicks:
+            vx = int(bframe_box["x"] + pt["x"])
+            vy = int(bframe_box["y"] + pt["y"])
+            print(f"[RECAPTCHA] screenshot_click({pt['x']},{pt['y']}) -> viewport({vx},{vy})")
+            clicks_data.append({"x": vx, "y": vy})
 
+        print(f"[RECAPTCHA] Совпало плиток: {len(clicks_data)}")
         _wait_step("КЛИКИ ПО ПЛИТКАМ", f"{len(clicks_data)} кликов")
         for i, pt in enumerate(clicks_data):
-            cx, cy = pt.get("x", 0), pt.get("y", 0)
+            cx, cy = pt["x"], pt["y"]
             print(f"[RECAPTCHA] Клик {i+1}/{len(clicks_data)} -> ({cx}, {cy})")
             click_human_like(page, cx, cy)
             if _debug():
                 _wait_step(f"КЛИК {i+1}")
             else:
                 _random_delay(0.25, 0.7)
+
+        verify_btn = _get_verify_button(page)
+        if verify_btn:
+            print(f"[RECAPTCHA] Verify в ({verify_btn[0]}, {verify_btn[1]})")
+            _wait_step("КЛИК ПРОВЕРИТЬ")
+            _random_delay(0.4, 0.8)
+            click_human_like(page, verify_btn[0], verify_btn[1])
+        else:
+            print("[RECAPTCHA] Verify не найдена")
+            _wait_step("VERIFY НЕ НАЙДЕНА")
+
+        time.sleep(3)
+        if _is_solved(page):
+            print("[RECAPTCHA] Решено!")
+            return True
 
         verify_btn = _get_verify_button(page)
         if verify_btn:

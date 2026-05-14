@@ -32,3 +32,6 @@ Rules:
 - One action per step.
 - If the task is complete, return done.
 - Keep the "reason" field SHORT — max 10 words. Do not exceed 200 total tokens.
+- NEVER try to change the interface language of a website. Ignore what language the UI is in.
+- Focus on completing the MAIN task first. Finish typing/search before worrying about any secondary requirements.
+- Do not click on language switch links. Search queries work in any language.

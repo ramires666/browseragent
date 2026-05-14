@@ -1,4 +1,5 @@
 import json
+import os
 import time
 import random
 import base64
@@ -7,6 +8,19 @@ from owl_llm import API_URL, API_KEY
 from owl_clicker import click_human_like
 
 RECAPTCHA_SCREENSHOT_PATH = r"W:\_python\OWL\_recaptcha_challenge.jpg"
+RECAPTCHA_DEBUG = os.getenv("RECAPTCHA_DEBUG", "").lower() in ("1", "true", "yes")
+
+
+def _wait_step(label, detail=None):
+    if not RECAPTCHA_DEBUG:
+        return
+    print(f"\n{'=' * 55}")
+    print(f"  [{label}]")
+    if detail:
+        print(f"  {detail}")
+    print(f"{'=' * 55}")
+    input("  >>> Нажми Enter для продолжения... ")
+    print()
 
 RECAPTCHA_SYSTEM_PROMPT = """
 You are solving a reCAPTCHA image challenge. Look at the screenshot: it shows a grid of square images and a challenge instruction at the top.
@@ -259,24 +273,36 @@ def is_recaptcha_challenge(page):
 
 def solve(page, max_rounds=5):
     """Разгадывает reCAPTCHA challenge через LLM vision + pyautogui."""
-    print("[RECAPTCHA] === НАЧАЛО РАЗГАДЫВАНИЯ ===")
+    print("\n" + "█" * 55)
+    print("  █ RECAPTCHA SOLVER — DEBUG РЕЖИМ" if RECAPTCHA_DEBUG else "  RECAPTCHA SOLVER")
+    print("█" * 55)
+    _wait_step("СТАРТ", "Начинаю разгадывание reCAPTCHA")
 
     for round_idx in range(max_rounds):
-        print(f"\n[RECAPTCHA] Раунд {round_idx + 1}/{max_rounds}")
+        print(f"\n{'─' * 55}")
+        print(f"  РАУНД {round_idx + 1}/{max_rounds}")
+        print(f"{'─' * 55}")
 
+        _wait_step("ПРОВЕРКА РЕШЕНИЯ", "Проверяю, не решена ли уже капча")
         if _is_solved(page):
             print("[RECAPTCHA] Уже решено!")
             return True
 
         challenge_text = get_challenge_text(page)
-        print(f"[RECAPTCHA] Текст задания: {challenge_text}")
+        print(f"\n[RECAPTCHA] Текст задания: \"{challenge_text}\"")
+        _wait_step(
+            "ТЕКСТ ЗАДАНИЯ",
+            f"Модель прочитала инструкцию:\n  \"{challenge_text}\"\n\n"
+            "Если текст пустой или неверный — проблема с извлечением из bframe"
+        )
 
         if not challenge_text:
-            print("[RECAPTCHA] Не удалось получить текст задания, жду 1с...")
+            print("[RECAPTCHA] Текст задания не получен, жду 1с...")
             time.sleep(1)
             continue
 
         bframe_box = _get_bframe_box(page)
+        print(f"\n[RECAPTCHA] bframe box: x={bframe_box['x']:.0f}, y={bframe_box['y']:.0f}, w={bframe_box['width']:.0f}, h={bframe_box['height']:.0f}")
         if not bframe_box:
             print("[RECAPTCHA] bframe не найден")
             return False
@@ -284,27 +310,57 @@ def solve(page, max_rounds=5):
         bframe = _find_bframe(page)
         iframe_el = bframe.frame_element()
         iframe_el.screenshot(path=RECAPTCHA_SCREENSHOT_PATH, type="jpeg", quality=95)
+        print(f"\n[RECAPTCHA] Скриншот сохранён: {RECAPTCHA_SCREENSHOT_PATH}")
+        _wait_step(
+            "СКРИНШОТ СДЕЛАН",
+            f"Файл: {RECAPTCHA_SCREENSHOT_PATH}\n"
+            f"Размер bframe: {bframe_box['width']:.0f} x {bframe_box['height']:.0f} px\n\n"
+            "Открой файл и проверь, что на нём видны плитки reCAPTCHA"
+        )
+
+        print(f"\n>>> ОТПРАВЛЯЮ ЗАПРОС В LLM (reCAPTCHA)...")
+        print(f"    challenge: \"{challenge_text}\"")
+        print(f"    screenshot: {int(bframe_box['width'])}x{int(bframe_box['height'])}")
+        _wait_step(
+            "ПЕРЕД ЗАПРОСОМ К LLM",
+            f"Сейчас будет отправлен запрос к {API_URL}\n"
+            f"С системным промптом RECAPTCHA_SYSTEM_PROMPT\n"
+            f"Challenge: \"{challenge_text}\"\n"
+            f"Скриншот: {int(bframe_box['width'])}x{int(bframe_box['height'])} px\n\n"
+            "Нажми Enter чтобы отправить запрос"
+        )
 
         result = _ask_llm_for_clicks(challenge_text, RECAPTCHA_SCREENSHOT_PATH, bframe_box)
         if not result:
+            print("[RECAPTCHA] LLM не вернула валидный JSON")
+            _wait_step("ОШИБКА LLM", "Ответ модели не распарсился как JSON. Проверь RAW выше.")
             _random_delay(0.5, 1)
             continue
 
+        print(f"\n[RECAPTCHA] ПАРСЕД ОТВЕТ: {json.dumps(result, ensure_ascii=False, indent=2)}")
+        _wait_step(
+            "ОТВЕТ LLM",
+            f"Модель вернула:\n{json.dumps(result, ensure_ascii=False, indent=2)}\n\n"
+            "Проверь: правильные ли выбраны координаты?"
+        )
+
         if result.get("done"):
-            print("[RECAPTCHA] LLM сообщила что уже решено")
+            print("[RECAPTCHA] ✅ LLM: уже решено")
             return True
 
         if result.get("skip"):
-            print("[RECAPTCHA] LLM хочет пропустить (новые картинки)")
+            print("[RECAPTCHA] 🔄 LLM: нужно пропустить/обновить")
             skip_btn = _get_skip_button(page)
             if skip_btn:
+                print(f"[RECAPTCHA] Клик 'Пропустить' в ({skip_btn[0]}, {skip_btn[1]})")
+                _wait_step("КЛИК SKIP", f"Координаты кнопки Skip: ({skip_btn[0]}, {skip_btn[1]}) viewport")
                 click_human_like(page, skip_btn[0], skip_btn[1])
             _random_delay(0.5, 1)
             continue
 
         raw_clicks = result.get("clicks", [])
         if not raw_clicks:
-            print("[RECAPTCHA] LLM не выбрала ни одной точки. Пропускаю.")
+            print("[RECAPTCHA] ⚠️ LLM не выбрала ни одной точки")
             skip_btn = _get_skip_button(page)
             if skip_btn:
                 click_human_like(page, skip_btn[0], skip_btn[1])
@@ -312,29 +368,49 @@ def solve(page, max_rounds=5):
             continue
 
         clicks_data = _dedup_coords(raw_clicks, threshold=20)
-        print(f"[RECAPTCHA] Координат до дедупликации: {len(raw_clicks)}, после: {len(clicks_data)}")
+        print(f"[RECAPTCHA] Координаты: {len(raw_clicks)} raw → {len(clicks_data)} после дедупликации")
+        for i, pt in enumerate(clicks_data):
+            sx, sy = pt["x"], pt["y"]
+            vx, vy = int(bframe_box["x"] + sx), int(bframe_box["y"] + sy)
+            print(f"    Клик {i+1}: screenshot({sx}, {sy}) → viewport({vx}, {vy})")
 
-        for pt in clicks_data:
-            sx = pt.get("x", 0)
-            sy = pt.get("y", 0)
-            vx = int(bframe_box["x"] + sx)
-            vy = int(bframe_box["y"] + sy)
-            print(f"[RECAPTCHA] Клик по картинке в ({vx}, {vy}) viewport")
+        _wait_step(
+            "КЛИКИ ПО ПЛИТКАМ",
+            f"Будет выполнено {len(clicks_data)} кликов:\n" +
+            "\n".join(
+                f"  {i+1}. viewport ({int(bframe_box['x']+p['x'])}, {int(bframe_box['y']+p['y'])})"
+                for i, p in enumerate(clicks_data)
+            ) +
+            "\n\nНажми Enter чтобы выполнить клики"
+        )
+
+        for i, pt in enumerate(clicks_data):
+            sx, sy = pt.get("x", 0), pt.get("y", 0)
+            vx, vy = int(bframe_box["x"] + sx), int(bframe_box["y"] + sy)
+            print(f"[RECAPTCHA] Клик {i+1}/{len(clicks_data)} → viewport ({vx}, {vy})")
             click_human_like(page, vx, vy)
-            _random_delay(0.25, 0.7)
+            if RECAPTCHA_DEBUG:
+                _wait_step(f"КЛИК {i+1} ВЫПОЛНЕН", f"Клик по ({vx}, {vy}) выполнен. Продолжить?")
+            else:
+                _random_delay(0.25, 0.7)
 
         verify_btn = _get_verify_button(page)
         if verify_btn:
-            print(f"[RECAPTCHA] Кнопка 'Проверить' в ({verify_btn[0]}, {verify_btn[1]}) viewport")
+            print(f"[RECAPTCHA] Кнопка 'Проверить': viewport ({verify_btn[0]}, {verify_btn[1]})")
+            _wait_step("КЛИК ПРОВЕРИТЬ", f"Координаты Verify: ({verify_btn[0]}, {verify_btn[1]})")
             _random_delay(0.4, 0.8)
             click_human_like(page, verify_btn[0], verify_btn[1])
         else:
-            print("[RECAPTCHA] Кнопка 'Проверить' не найдена")
+            print("[RECAPTCHA] ⚠️ Кнопка 'Проверить' не найдена в DOM bframe")
+            _wait_step("VERIFY НЕ НАЙДЕНА", "Проверь: может быть другая структура iframe?")
 
+        if RECAPTCHA_DEBUG:
+            _wait_step("ОЖИДАНИЕ 2.5с", "Жду 2.5 секунды для проверки результата...")
         time.sleep(2.5)
 
         if _is_solved(page):
-            print("[RECAPTCHA] РЕШЕНО!")
+            print("[RECAPTCHA] ✅ РЕШЕНО!")
+            _wait_step("РЕШЕНО", "reCAPTCHA успешно пройдена!")
             return True
 
         incorrect = False
@@ -348,9 +424,13 @@ def solve(page, max_rounds=5):
         except Exception:
             pass
         if incorrect:
-            print("[RECAPTCHA] Неправильный ответ, пробую снова...")
+            print("[RECAPTCHA] ❌ Неправильный ответ")
+            _wait_step("НЕВЕРНО", "Модель выбрала не те плитки. Нажми Enter чтобы попробовать снова")
             _random_delay(0.8, 1.5)
             continue
+
+        _wait_step("НЕИЗВЕСТНЫЙ РЕЗУЛЬТАТ",
+                    "Капча не решена, но и ошибка не показана. Возможно, нужно больше времени. Продолжить?")
 
     print("[RECAPTCHA] Достигнут лимит попыток")
     return False

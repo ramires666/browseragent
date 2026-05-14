@@ -364,22 +364,34 @@ def do_action(page, action, elements):
 
     if kind == "click":
         el_id = action["id"]
-        print(f"[PYAUTOGUI] click {el_id} — через vision fallback (скриншот->LLM->координаты)...")
+        coords = find_element_coords(elements, el_id)
+        if coords:
+            print(f"[PYAUTOGUI] click {el_id} по DOM координатам ({coords[0]}, {coords[1]})")
+            click_human_like(page, coords[0], coords[1])
+            return False
+        print(f"[PYAUTOGUI] DOM координат нет для {el_id}, пробую vision fallback...")
         ok = vision_fallback(page, action, elements, action_label=f"click {el_id}")
         if not ok:
-            coords = find_element_coords(elements, el_id)
-            if coords:
-                print(f"[PYAUTOGUI] Vision не помогла, пробую DOM координаты ({coords[0]}, {coords[1]})")
-                click_human_like(page, coords[0], coords[1])
-            else:
-                print(f"[PYAUTOGUI] Ничего не помогло — ошибка")
-                raise
+            print(f"[PYAUTOGUI] Ничего не помогло — ошибка")
+            raise
         return False
 
     if kind == "type":
         el_id = action["id"]
         text = action["text"]
-        print(f"[PYAUTOGUI] type '{text[:30]}' в {el_id} — через vision fallback...")
+        coords = find_element_coords(elements, el_id)
+        if coords:
+            print(f"[PYAUTOGUI] click + type в {el_id} по DOM координатам ({coords[0]}, {coords[1]})")
+            click_human_like(page, coords[0], coords[1])
+            time.sleep(0.5)
+            type_fallback(page, text)
+            ok2, reason = verify_action_via_screenshot(page, action)
+            if not ok2:
+                print(f"[VERIFY] Текст не ввёлся: {reason}. Пробую ещё раз...")
+                time.sleep(0.5)
+                type_fallback(page, text)
+            return False
+        print(f"[PYAUTOGUI] DOM координат нет для {el_id}, пробую vision fallback...")
         ok = vision_fallback(page, action, elements, action_label=f"type into {el_id}")
         if ok:
             time.sleep(0.5)
@@ -390,15 +402,8 @@ def do_action(page, action, elements):
                 time.sleep(0.5)
                 type_fallback(page, text)
         else:
-            coords = find_element_coords(elements, el_id)
-            if coords:
-                print(f"[PYAUTOGUI] Vision не помогла, тыкаю в DOM координаты ({coords[0]}, {coords[1]})")
-                click_human_like(page, coords[0], coords[1])
-                time.sleep(0.5)
-                type_fallback(page, text)
-            else:
-                print(f"[PYAUTOGUI] Ничего не помогло — ошибка")
-                raise
+            print(f"[PYAUTOGUI] Ничего не помогло — ошибка")
+            raise
         return False
 
     if kind == "press":

@@ -188,8 +188,7 @@ def verify_action_via_screenshot(page, action):
     """После выполнения действия делает скриншот и спрашивает LLM, сработало ли."""
     import base64
     import requests
-    from owl_llm import API_URL, API_KEY
-    from owl_llm import SCREENSHOT_PATH
+    from owl_llm import API_URL, API_KEY, SCREENSHOT_PATH, repair_json, _ask_model_to_fix_json
 
     time.sleep(0.8)
     page.screenshot(path=SCREENSHOT_PATH, type="jpeg", quality=85, full_page=False)
@@ -213,7 +212,7 @@ def verify_action_via_screenshot(page, action):
             }
         ],
         "temperature": 0.1,
-        "max_tokens": 200,
+        "max_tokens": 400,
         "stream": False,
     }
 
@@ -227,12 +226,19 @@ def verify_action_via_screenshot(page, action):
         msg = r.json()["choices"][0]["message"]
         raw = (msg.get("content") or msg.get("reasoning_content") or "").strip()
         print(f"[VERIFY RAW] {raw[:300]}")
+        brace = raw.find("{")
+        if brace >= 0:
+            raw = raw[brace:]
+        close = raw.rfind("}")
+        if close >= 0:
+            raw = raw[:close + 1]
+        raw = repair_json(raw)
         try:
             result = json.loads(raw)
         except json.JSONDecodeError:
-            brace = raw.find("{")
-            if brace >= 0:
-                result = json.loads(raw[brace:])
+            fixed = _ask_model_to_fix_json(raw)
+            if fixed:
+                result = json.loads(fixed)
             else:
                 raise
         return result.get("ok", False), result.get("reason", "")
@@ -390,6 +396,8 @@ def do_action(page, action, elements):
                 print(f"[VERIFY] Текст не ввёлся: {reason}. Пробую ещё раз...")
                 time.sleep(0.5)
                 type_fallback(page, text)
+            print("[PYAUTOGUI] Enter после ввода текста")
+            press_fallback(page, "enter")
             return False
         print(f"[PYAUTOGUI] DOM координат нет для {el_id}, пробую vision fallback...")
         ok = vision_fallback(page, action, elements, action_label=f"type into {el_id}")
@@ -401,6 +409,8 @@ def do_action(page, action, elements):
                 print(f"[VERIFY] Текст не ввёлся: {reason}. Пробую ещё раз...")
                 time.sleep(0.5)
                 type_fallback(page, text)
+            print("[PYAUTOGUI] Enter после ввода текста")
+            press_fallback(page, "enter")
         else:
             print(f"[PYAUTOGUI] Ничего не помогло — ошибка")
             raise

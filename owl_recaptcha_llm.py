@@ -4,13 +4,16 @@ import re
 import requests
 from owl_llm import API_URL, API_KEY
 
-SYSTEM_PROMPT = """Look at the reCAPTCHA screenshot. Find ALL tiles that match the instruction.
-Return tile indices (0-8, left-to-right top-to-bottom).
+SYSTEM_PROMPT = """Look at the screenshot. Find ALL objects that match the instruction.
+Return pixel coordinates (x,y) center of each matching object.
+
+IMPORTANT: Use a 1000x1000 coordinate system. The image should be thought of as 1000x1000 pixels.
+Map every pixel in the image to this 0-1000 range.
 
 FORMAT:
-{"tiles":[0,3,5],"reason":"which tiles match and why"}
+{"clicks":[{"x":200,"y":300},{"x":500,"y":700}],"reason":"which objects match and why"}
 
-If no matches: {"tiles":[],"skip":true}
+If no matches: {"clicks":[],"skip":true}
 If done: {"done":true}"""
 
 
@@ -107,7 +110,7 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": [
-                {"type": "text", "text": f"Image is {img_w}x{img_h}px. 3x3 grid. Tiles numbered 0-8 left-to-right, top-to-bottom. Return tile indices that match."},
+                {"type": "text", "text": f"Image is {img_w}x{img_h}px. Think of it as 1000x1000. Return center coords of each matching object in 0-1000 space."},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
             ]}
         ],

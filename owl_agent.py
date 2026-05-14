@@ -140,6 +140,77 @@ def detect_captcha(page, elements):
     return False
 
 
+VISION_FALLBACK_PROMPT = """
+You see a screenshot of a browser. The system needs to perform an action but cannot find the target element in the DOM.
+
+Action to perform: {action}
+
+Look at the screenshot carefully. Find the element that matches the action description.
+Return the exact viewport pixel coordinates (x, y) of the CENTER of that element.
+
+Return ONLY valid JSON:
+{"found":true,"x":200,"y":350,"reason":"the search button is at these coordinates"}
+or if not found:
+{"found":false,"reason":"element not visible in screenshot"}
+"""
+
+
+def vision_fallback(page, action, elements, action_label=""):
+    """Универсальный fallback: скриншот + LLM ищет элемент и возвращает координаты для клика."""
+    import base64
+    import requests
+    from owl_llm import API_URL, API_KEY
+
+    print(f"[VISION FALLBACK] Ищу элемент через скриншот... действие: {action_label or action}")
+    time.sleep(0.5)
+    page.screenshot(path=SCREENSHOT_PATH, type="jpeg", quality=90, full_page=False)
+
+    with open(SCREENSHOT_PATH, "rb") as f:
+        image_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+    viewport = page.viewport_size
+    prompt = VISION_FALLBACK_PROMPT.format(action=json.dumps(action, ensure_ascii=False))
+
+    payload = {
+        "model": "gui-owl",
+        "messages": [
+            {"role": "system", "content": prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"Viewport: {viewport['width']}x{viewport['height']}. Find element for action: {json.dumps(action, ensure_ascii=False)}"},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
+                ]
+            }
+        ],
+        "temperature": 0.1,
+        "max_tokens": 300,
+        "stream": False,
+    }
+
+    headers = {}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
+
+    try:
+        r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
+        r.raise_for_status()
+        raw = r.json()["choices"][0]["message"]["content"]
+        print(f"[VISION FALLBACK RAW] {raw}")
+        result = json.loads(raw)
+        if result.get("found") and "x" in result and "y" in result:
+            vx, vy = int(result["x"]), int(result["y"])
+            print(f"[VISION FALLBACK] LLM указала координаты ({vx}, {vy}) — кликаю через pyautogui")
+            click_human_like(page, vx, vy)
+            return True
+        else:
+            print(f"[VISION FALLBACK] LLM не нашла элемент: {result.get('reason', 'no reason')}")
+            return False
+    except Exception as e:
+        print(f"[VISION FALLBACK] Ошибка: {e}")
+        return False
+
+
 def same_action(a, b):
     if not a or not b:
         return False
@@ -167,8 +238,11 @@ def do_action(page, action, elements):
                 click_fallback(page, coords[0], coords[1])
                 print(f"[FALLBACK] pyautogui click at viewport ({coords[0]}, {coords[1]})")
             else:
-                print(f"[FALLBACK] Element {el_id} not found in list, retrying with full page screenshot...")
-                raise
+                print(f"[FALLBACK] Element {el_id} not in DOM list — пробую vision fallback...")
+                ok = vision_fallback(page, action, elements, action_label=f"click {el_id}")
+                if not ok:
+                    print(f"[FALLBACK] Vision не помогла — ошибка")
+                    raise
         return False
 
     if kind == "type":
@@ -186,8 +260,13 @@ def do_action(page, action, elements):
                 type_fallback(page, text)
                 print(f"[FALLBACK] pyautogui type at viewport ({coords[0]}, {coords[1]})")
             else:
-                print(f"[FALLBACK] Element {el_id} not found in list")
-                raise
+                print(f"[FALLBACK] Element {el_id} not in DOM list — пробую vision fallback...")
+                ok = vision_fallback(page, action, elements, action_label=f"type into {el_id}")
+                if ok:
+                    type_fallback(page, text)
+                else:
+                    print(f"[FALLBACK] Vision не помогла — ошибка")
+                    raise
         return False
 
     if kind == "press":

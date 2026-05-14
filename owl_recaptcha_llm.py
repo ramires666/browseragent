@@ -59,6 +59,27 @@ def _parse_reasoning(raw):
     return None
 
 
+def _normalize_result(parsed):
+    """Приводит любой формат ответа LLM к {"clicks":[{"x":int,"y":int}]}."""
+    if not parsed:
+        return None
+    if isinstance(parsed, dict) and "clicks" in parsed:
+        return parsed
+    if isinstance(parsed, list):
+        clicks = []
+        for item in parsed:
+            if isinstance(item, dict):
+                if "click" in item:
+                    val = item["click"]
+                    if isinstance(val, (list, tuple)) and len(val) == 2:
+                        clicks.append({"x": int(val[0]), "y": int(val[1])})
+                elif "x" in item and "y" in item:
+                    clicks.append({"x": int(item["x"]), "y": int(item["y"])})
+        if clicks:
+            return {"clicks": clicks}
+    return None
+
+
 def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
     with open(screenshot_path, "rb") as f:
         image_b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -91,9 +112,11 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
             return None, None
 
         parsed = _extract_json(raw)
-        if parsed and isinstance(parsed, dict) and "clicks" in parsed:
-            print("[RECAPTCHA] Найден JSON с clicks")
-            return parsed, None
+        if parsed:
+            normalized = _normalize_result(parsed)
+            if normalized:
+                print("[RECAPTCHA] Найден JSON с clicks")
+                return normalized, None
 
         print("[RECAPTCHA] JSON без clicks, парсю reasoning...")
         reasoning = _parse_reasoning(raw)

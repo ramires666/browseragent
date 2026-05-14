@@ -122,20 +122,30 @@ def double_click_fallback(page, vx, vy):
 
 def type_fallback(page, text):
     """Побуквенный ввод через pyautogui.write() с переключением раскладки под кириллицу."""
-    _focus_browser_window(page)
-    time.sleep(0.2)
-    page.bring_to_front()
-    time.sleep(0.2)
-
     has_cyrillic = _has_cyrillic(text)
+
     if has_cyrillic:
-        print(f"[TYPE] переключаю раскладку на русскую")
         _set_keyboard_layout("00000419")
-
-    pyautogui.write(text, interval=0.05)
-
-    if has_cyrillic:
+        print(f"[TYPE] раскладка переключена на русскую")
+    else:
         _set_keyboard_layout("00000409")
+        print(f"[TYPE] раскладка переключена на английскую")
+
+    time.sleep(0.1)
+
+    _focus_browser_window(page)
+    page.bring_to_front()
+    time.sleep(0.3)
+
+    _user32.ClipCursor(None)
+    time.sleep(0.1)
+
+    pyautogui.write(text, interval=0.06)
+    time.sleep(0.2)
+
+    _set_keyboard_layout("00000409")
+    if has_cyrillic:
+        print(f"[TYPE] раскладка возвращена на английскую")
     print(f"[TYPE] напечатано: '{text[:30]}'")
 
 

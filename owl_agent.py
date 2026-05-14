@@ -184,7 +184,7 @@ def vision_fallback(page, action, elements, action_label=""):
             }
         ],
         "temperature": 0.1,
-        "max_tokens": 300,
+        "max_tokens": 1200,
         "stream": False,
     }
 
@@ -195,9 +195,30 @@ def vision_fallback(page, action, elements, action_label=""):
     try:
         r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
         r.raise_for_status()
-        raw = r.json()["choices"][0]["message"]["content"]
-        print(f"[VISION FALLBACK RAW] {raw}")
-        result = json.loads(raw)
+        msg = r.json()["choices"][0]["message"]
+        raw = (msg.get("content") or "").strip()
+        if not raw:
+            raw = (msg.get("reasoning_content") or "").strip()
+        print(f"[VISION FALLBACK RAW] {raw[:500]}")
+
+        if not raw:
+            print("[VISION FALLBACK] LLM вернула пустой ответ")
+            return False
+
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError:
+            from owl_llm import repair_json
+            repaired = repair_json(raw)
+            if repaired != raw:
+                try:
+                    result = json.loads(repaired)
+                except json.JSONDecodeError:
+                    print(f"[VISION FALLBACK] JSON не исправляется: {raw[:200]}")
+                    return False
+            else:
+                print(f"[VISION FALLBACK] JSON невалиден: {raw[:200]}")
+                return False
         if result.get("found") and "x" in result and "y" in result:
             vx, vy = int(result["x"]), int(result["y"])
             print(f"[VISION FALLBACK] LLM указала координаты ({vx}, {vy}) — кликаю через pyautogui")

@@ -198,6 +198,35 @@ def _dedup_coords(clicks, threshold=25):
     return unique
 
 
+def _repair_json(text):
+    stripped = text.strip()
+    if not stripped:
+        return stripped
+    try:
+        json.loads(stripped)
+        return stripped
+    except json.JSONDecodeError:
+        pass
+    if stripped.count("{") > stripped.count("}"):
+        stripped += "}"
+    if stripped.count("[") > stripped.count("]"):
+        stripped += "]"
+    try:
+        json.loads(stripped)
+        return stripped
+    except json.JSONDecodeError:
+        pass
+    idx = stripped.rfind(':"')
+    if idx > 0 and not stripped.endswith('"}'):
+        stripped += '"}'
+    try:
+        json.loads(stripped)
+        return stripped
+    except json.JSONDecodeError:
+        pass
+    return text
+
+
 def _ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
     with open(screenshot_path, "rb") as f:
         image_b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -226,7 +255,7 @@ def _ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
             }
         ],
         "temperature": 0.1,
-        "max_tokens": 800,
+        "max_tokens": 1200,
         "stream": False,
     }
 
@@ -235,14 +264,31 @@ def _ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
         headers["Authorization"] = f"Bearer {API_KEY}"
 
     r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
+    print(f"[RECAPTCHA LLM STATUS] {r.status_code}")
     r.raise_for_status()
-    raw = r.json()["choices"][0]["message"]["content"]
-    print(f"[RECAPTCHA LLM RAW] {raw}")
+    data = r.json()
+    msg = data["choices"][0]["message"]
+    raw = (msg.get("content") or "").strip()
+    if not raw:
+        raw = (msg.get("reasoning_content") or "").strip()
+    print(f"[RECAPTCHA LLM RAW] {raw[:500]}")
+
+    if not raw:
+        print(f"[RECAPTCHA] LLM вернула пустой ответ. Вся message: {json.dumps(msg, ensure_ascii=False)[:300]}")
+        print(f"[RECAPTCHA] Статус: {r.status_code}")
+        return None
 
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        print(f"[RECAPTCHA] LLM вернула невалидный JSON: {raw}")
+        repaired = _repair_json(raw)
+        if repaired != raw:
+            print(f"[RECAPTCHA JSON REPAIR] исправлено")
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
+        print(f"[RECAPTCHA] LLM вернула невалидный JSON: {raw[:300]}")
         return None
 
 
@@ -292,7 +338,7 @@ def find_challenge_via_screenshot(page):
             }
         ],
         "temperature": 0.1,
-        "max_tokens": 500,
+        "max_tokens": 1200,
         "stream": False,
     }
 
@@ -302,12 +348,25 @@ def find_challenge_via_screenshot(page):
 
     r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
     r.raise_for_status()
-    raw = r.json()["choices"][0]["message"]["content"]
-    print(f"[RECAPTCHA VISION RAW] {raw}")
+    msg = r.json()["choices"][0]["message"]
+    raw = (msg.get("content") or "").strip()
+    if not raw:
+        raw = (msg.get("reasoning_content") or "").strip()
+    print(f"[RECAPTCHA VISION RAW] {raw[:500]}")
+
+    if not raw:
+        print("[RECAPTCHA VISION] LLM вернула пустой ответ")
+        return None
 
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
+        repaired = _repair_json(raw)
+        if repaired != raw:
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
         print(f"[RECAPTCHA VISION] LLM вернула невалидный JSON")
         return None
 

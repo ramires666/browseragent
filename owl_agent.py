@@ -170,7 +170,7 @@ def detect_captcha(page, elements):
 
 
 VISION_VERIFY_PROMPT = """
-You see a screenshot taken AFTER performing this action: {action}
+You see a screenshot taken AFTER performing this action: __ACTION__
 
 Look at the screenshot carefully and verify if the action succeeded.
 - For a click: is the target element now activated/selected/focused?
@@ -178,9 +178,9 @@ Look at the screenshot carefully and verify if the action succeeded.
 - For pressing a key: did the expected change happen?
 
 Return ONLY valid JSON:
-{"ok":true,"reason":"the element is now focused"}
+{{"ok":true,"reason":"the element is now focused"}}
 or
-{"ok":false,"reason":"the click missed, element is not focused"}
+{{"ok":false,"reason":"the click missed, element is not focused"}}
 """
 
 
@@ -198,7 +198,7 @@ def verify_action_via_screenshot(page, action):
         image_b64 = base64.b64encode(f.read()).decode("utf-8")
 
     viewport = page.viewport_size
-    prompt = VISION_VERIFY_PROMPT.format(action=json.dumps(action, ensure_ascii=False))
+    prompt = VISION_VERIFY_PROMPT.replace("__ACTION__", json.dumps(action, ensure_ascii=False))
 
     payload = {
         "model": "gui-owl",
@@ -244,15 +244,15 @@ def verify_action_via_screenshot(page, action):
 VISION_FALLBACK_PROMPT = """
 You see a screenshot of a browser. The system needs to perform an action but cannot find the target element in the DOM.
 
-Action to perform: {action}
+Action to perform: __ACTION__
 
 Look at the screenshot carefully. Find the element that matches the action description.
 Return the exact viewport pixel coordinates (x, y) of the CENTER of that element.
 
 Return ONLY valid JSON:
-{"found":true,"x":200,"y":350,"reason":"the search button is at these coordinates"}
+{{"found":true,"x":200,"y":350,"reason":"the search button is at these coordinates"}}
 or if not found:
-{"found":false,"reason":"element not visible in screenshot"}
+{{"found":false,"reason":"element not visible in screenshot"}}
 """
 
 
@@ -270,7 +270,7 @@ def vision_fallback(page, action, elements, action_label=""):
         image_b64 = base64.b64encode(f.read()).decode("utf-8")
 
     viewport = page.viewport_size
-    prompt = VISION_FALLBACK_PROMPT.format(action=json.dumps(action, ensure_ascii=False))
+    prompt = VISION_FALLBACK_PROMPT.replace("__ACTION__", json.dumps(action, ensure_ascii=False))
 
     payload = {
         "model": "gui-owl",

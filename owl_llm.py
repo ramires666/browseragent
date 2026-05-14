@@ -112,7 +112,7 @@ def _ask_model_to_fix_json(bad_text):
 
 Text:
 ```
-{bad_text[:2000]}
+{bad_text[:3000]}
 ```
 
 Return ONLY the corrected JSON, no explanations."""
@@ -124,7 +124,7 @@ Return ONLY the corrected JSON, no explanations."""
             {"role": "user", "content": fix_prompt}
         ],
         "temperature": 0.0,
-        "max_tokens": 1000,
+        "max_tokens": 2000,
         "stream": False,
     }
 
@@ -140,6 +140,10 @@ Return ONLY the corrected JSON, no explanations."""
         brace = fixed.find("{")
         if brace >= 0:
             fixed = fixed[brace:]
+        close = fixed.rfind("}")
+        if close >= 0:
+            fixed = fixed[:close + 1]
+        fixed = repair_json(fixed)
         json.loads(fixed)
         return fixed
     except Exception as e:

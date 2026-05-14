@@ -247,12 +247,15 @@ You see a screenshot of a browser. The system needs to perform an action but can
 Action to perform: __ACTION__
 
 Look at the screenshot carefully. Find the element that matches the action description.
-Return the exact viewport pixel coordinates (x, y) of the CENTER of that element.
 
-Return ONLY valid JSON:
-{{"found":true,"x":200,"y":350,"reason":"the search button is at these coordinates"}}
+CRITICAL: Return ONLY a JSON object. Do NOT output any reasoning, chain-of-thought, or text before or after the JSON. Your entire response must be valid JSON.
+
+Return EXACT pixel coordinates (x, y) of the CENTER of that element in viewport:
+{"found":true,"x":200,"y":350,"reason":"the search button is at these coordinates"}
 or if not found:
-{{"found":false,"reason":"element not visible in screenshot"}}
+{"found":false,"reason":"element not visible in screenshot"}
+
+After you output the JSON, STOP immediately.
 """
 
 
@@ -285,7 +288,7 @@ def vision_fallback(page, action, elements, action_label=""):
             }
         ],
         "temperature": 0.1,
-        "max_tokens": 2000,
+        "max_tokens": 4000,
         "stream": False,
     }
 

@@ -519,27 +519,18 @@ def solve(page, max_rounds=5):
                 if not isinstance(pt, dict):
                     print(f"[RECAPTCHA] клик {i} не словарь: {pt}, пропускаю")
                     continue
-                x_val = pt.get("x", 0)
-                y_val = pt.get("y", 0)
-                if isinstance(x_val, (list, tuple)):
-                    x_val = sum(x_val) / len(x_val) if x_val else 0
-                if isinstance(y_val, (list, tuple)):
-                    y_val = sum(y_val) / len(y_val) if y_val else 0
                 try:
-                    fx, fy = float(x_val), float(y_val)
-                except (TypeError, ValueError):
+                    fx, fy = float(pt["x"]), float(pt["y"])
+                except (KeyError, TypeError, ValueError):
                     print(f"[RECAPTCHA] клик {i} с некорректными координатами: {pt}, пропускаю")
                     continue
-                # 1) Модель выдаёт в 0-1000 -> переводим в px скриншота
-                nw = shot_w / NORM
-                nh = shot_h / NORM
-                sx = fx * nw
-                sy = fy * nh
-                # 2) screenshot px -> CSS px через scale
+                # 0-1000 -> px скриншота -> CSS px -> viewport
+                sx = fx / NORM * shot_w
+                sy = fy / NORM * shot_h
                 cx = sx / scale_val
                 cy = sy / scale_val
                 if cx > bw or cy > bh or cx < 0 or cy < 0:
-                    print(f"[RECAPTCHA] коорд ({fx},{fy})/NORM->({sx:.0f},{sy:.0f})px ВНЕ iframe ({bw}x{bh}) после scale={scale_val} -> CSS({cx:.0f},{cy:.0f}) — пропускаю")
+                    print(f"[RECAPTCHA] ({fx},{fy})/NORM->({sx:.0f},{sy:.0f})px ВНЕ iframe ({bw}x{bh}) -> CSS({cx:.0f},{cy:.0f}) — пропускаю")
                     continue
                 vx = int(bframe_box["x"] + cx)
                 vy = int(bframe_box["y"] + cy)

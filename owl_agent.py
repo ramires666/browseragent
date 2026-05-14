@@ -12,6 +12,7 @@ from owl_browser import (
 from owl_llm import ask_model, SCREENSHOT_PATH
 from owl_clicker import (
     click_fallback,
+    click_human_like,
     double_click_fallback,
     type_fallback,
     press_fallback,
@@ -56,26 +57,32 @@ def detect_google_block(page):
 
 
 def handle_google_block(page):
-    print("\n[GOOGLE BLOCK] Обнаружена блокировка Google. Жду 1.5с для загрузки чекбокса...")
-    time.sleep(1.5)
+    print("\n[GOOGLE BLOCK] Обнаружена блокировка Google. Жду 3с для загрузки reCAPTCHA...")
+    time.sleep(3)
 
     for attempt in range(3):
         vx, vy = _find_recaptcha_checkbox(page)
         if vx is not None:
-            print(f"[GOOGLE BLOCK] reCAPTCHA чекбокс найден, клик через pyautogui (viewport {vx}, {vy})")
-            click_fallback(page, vx, vy)
-            print("[GOOGLE BLOCK] Кликнул. Жду 1.5с...")
-            time.sleep(1.5)
-            print("[GOOGLE BLOCK] Завершено. Перехожу к шагу с капчей.")
-            return True
-        print(f"[GOOGLE BLOCK] reCAPTCHA iframe не найден, попытка {attempt + 1}/3, жду 1с...")
+            print(f"[GOOGLE BLOCK] Чекбокс найден, клик через pyautogui (viewport {vx:.0f}, {vy:.0f})")
+            click_human_like(page, int(vx), int(vy))
+            print("[GOOGLE BLOCK] Кликнул. Жду 3с появления challenge...")
+            time.sleep(3)
+
+            if is_recaptcha_challenge(page):
+                print("[GOOGLE BLOCK] Challenge появился!")
+                return True
+            else:
+                print(f"[GOOGLE BLOCK] Challenge не появился. Попытка {attempt + 1}/3")
+                time.sleep(1)
+                continue
+
+        print(f"[GOOGLE BLOCK] iframe не найден, попытка {attempt + 1}/3, жду 1с...")
         time.sleep(1)
 
-    print("[GOOGLE BLOCK] Не удалось найти reCAPTCHA. Пробую кликнуть по центру страницы через pyautogui (нижняя треть)...")
+    print("[GOOGLE BLOCK] Не удалось активировать reCAPTCHA за 3 попытки.")
     page.screenshot(path=SCREENSHOT_PATH, type="jpeg", quality=85, full_page=False)
-
     text = page_text(page)
-    print(f"[GOOGLE BLOCK] Текст на странице: {text[:500]}")
+    print(f"[GOOGLE BLOCK] Текст страницы: {text[:500]}")
     return False
 
 
@@ -226,6 +233,7 @@ def main():
     history = []
     last_action = None
     repeat_count = 0
+    google_block_attempts = 0
     playwright = browser = page = None
 
     try:
@@ -244,8 +252,37 @@ def main():
                 print(el)
 
             if detect_google_block(page):
+                google_block_attempts += 1
+                print(f"\n[GOOGLE BLOCK] Попытка {google_block_attempts}/3")
+
+                if google_block_attempts >= 3:
+                    print("[GOOGLE BLOCK] 3 попытки не помогли.")
+                    print("    Пройди проверку вручную в окне браузера,")
+                    print("    затем нажми Enter чтобы продолжить...")
+                    input("    >> ")
+                    print("[CONTINUE]")
+                    time.sleep(1)
+                    continue
+
                 handle_google_block(page)
-                continue
+
+                if is_recaptcha_challenge(page):
+                    print("[GOOGLE BLOCK] reCAPTCHA challenge появился, решаю...")
+                    solved = solve_recaptcha(page)
+                    if solved:
+                        google_block_attempts = 0
+                        print("[CAPTCHA] reCAPTCHA разгадана!")
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        print("[CAPTCHA] reCAPTCHA не решена, прошу помощи...")
+                        print("    Разгадай вручную, затем нажми Enter...")
+                        input("    >> ")
+                        print("[CONTINUE]")
+                        time.sleep(1)
+                        continue
+                else:
+                    continue
 
             if is_recaptcha_challenge(page):
                 print("\n[!] ОБНАРУЖЕНА reCAPTCHA — пробую разгадать автоматически...")

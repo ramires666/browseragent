@@ -189,9 +189,9 @@ def _get_tiles(page):
         return None
 
 
-def _tiles_to_clicks(raw_tiles, bframe_box, page):
-    """Преобразует tile индексы (0-8 для 3x3) в viewport координаты кликов.
-    Поддерживает и старый формат [{"x":...,"y":...}] для обратной совместимости."""
+def _tiles_to_clicks(raw_tiles, result, bframe_box, page):
+    """Преобразует tile индексы в viewport координаты.
+    Приоритет: grid из LLM (точные границы из скриншота) -> DOM _get_tiles -> fallback."""
     if not raw_tiles:
         return []
 
@@ -199,19 +199,36 @@ def _tiles_to_clicks(raw_tiles, bframe_box, page):
     if old_format:
         return _dedup_coords(raw_tiles, threshold=20)
 
+    grid = result.get("grid") if result else None
+    if grid:
+        print(f"[RECAPTCHA] grid из LLM: x={grid['x']} y={grid['y']} cell_w={grid['cell_w']} cell_h={grid['cell_h']} cols={grid['cols']} rows={grid['rows']}")
+        sx_w = bframe_box["width"]
+        sx_h = bframe_box["height"]
+        clicks = []
+        for idx in raw_tiles:
+            col = idx % grid["cols"]
+            row = idx // grid["cols"]
+            scr_x = grid["x"] + col * grid["cell_w"] + grid["cell_w"] // 2
+            scr_y = grid["y"] + row * grid["cell_h"] + grid["cell_h"] // 2
+            vp_x = int(bframe_box["x"] + scr_x)
+            vp_y = int(bframe_box["y"] + scr_y)
+            print(f"[RECAPTCHA] tile {idx} (row={row} col={col}): screenshot_center({scr_x},{scr_y}) -> viewport({vp_x},{vp_y})")
+            clicks.append({"x": vp_x, "y": vp_y, "index": idx})
+        return clicks
+
     tiles = _get_tiles(page)
     if not tiles:
         print("[RECAPTCHA] tiles_to_clicks: не могу получить плитки, возвращаю индексы как есть")
         return [{"x": int(bframe_box["x"]) + 50 + (i % 3) * 100, "y": int(bframe_box["y"]) + 50 + (i // 3) * 100}
                 for i in raw_tiles]
 
-    result = []
+    result_list = []
     for idx in raw_tiles:
         if 0 <= idx < len(tiles):
-            result.append({"x": tiles[idx]["x"], "y": tiles[idx]["y"], "index": idx})
+            result_list.append({"x": tiles[idx]["x"], "y": tiles[idx]["y"], "index": idx})
         else:
             print(f"[RECAPTCHA] tiles_to_clicks: индекс {idx} вне диапазона (0-{len(tiles)-1})")
-    return result
+    return result_list
 
 
 def _snap_to_grid(coords, bframe_box, page):
@@ -395,7 +412,7 @@ def solve(page, max_rounds=5):
             _random_delay(0.5, 1)
             continue
 
-        clicks_data = _tiles_to_clicks(raw_tiles, bframe_box, page)
+        clicks_data = _tiles_to_clicks(raw_tiles, result, bframe_box, page)
         print(f"[RECAPTCHA] Совпало плиток: {len(clicks_data)}")
         for i, pt in enumerate(clicks_data):
             vx, vy = pt["x"], pt["y"]

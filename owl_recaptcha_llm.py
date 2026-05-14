@@ -13,21 +13,29 @@ IMPORTANT: Output ONLY raw JSON. Do NOT include thinking, reasoning, explanation
 Your job:
 1. Read the challenge instruction (e.g. "select all squares with traffic lights" or "select all images with a fire hydrant")
 2. Look at EVERY image in the grid carefully
-3. Return the TILE INDEX (0-based) of EVERY tile that matches
+3. Determine the EXACT pixel boundaries of the grid and each tile within it
 
-Tiles are indexed row-by-row, left-to-right, top-to-bottom:
-- Row 0: indices 0, 1, 2, ...
-- Row 1: indices N, N+1, N+2, ... (where N = number of columns)
-- etc.
+The screenshot includes the FULL challenge area. Tiles are indexed row-by-row, left-to-right, top-to-bottom. Grid can be 3x3, 4x4, 3x4, or 4x3.
 
-The grid can be 3x3, 4x4, 3x4, or 4x3. Always count tiles in the visible grid and index them:
-- 3x3 grid: indices 0-8
-- 4x4 grid: indices 0-15
-- 3x4 grid (3 rows, 4 cols): indices 0-11
-- 4x3 grid (4 rows, 3 cols): indices 0-11
+Return EXACTLY this JSON format with PRECISE screenshot pixel coordinates:
+{
+  "tiles": [0, 3, 6],
+  "grid": {
+    "x": 10,
+    "y": 60,
+    "cell_w": 120,
+    "cell_h": 120,
+    "cols": 3,
+    "rows": 3
+  },
+  "reason": "top-left, middle-left, bottom-left contain the target"
+}
 
-Return exactly this JSON format:
-{"tiles":[0,3,6],"reason":"top-left, middle-left, and bottom-left have the target"}
+- "grid.x" = left edge of the first tile in screenshot pixels
+- "grid.y" = top edge of the first tile in screenshot pixels (AFTER the instruction text)
+- "grid.cell_w" = width of one tile in pixels
+- "grid.cell_h" = height of one tile in pixels
+- "grid.cols" / "grid.rows" = grid dimensions
 
 CRITICAL RULES FOR SPLIT-OBJECT CHALLENGES:
 - The target object may be SPLIT across multiple adjacent tiles (like a puzzle).
@@ -189,7 +197,7 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
                         "type": "text",
                         "text": (
                             f"Challenge: \"{challenge_text}\"\n\n"
-                            "List the TILE INDEX (0-8 for 3x3) of EVERY matching tile."
+                            "Return tile indices AND grid pixel boundaries in this screenshot."
                         )
                     },
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}

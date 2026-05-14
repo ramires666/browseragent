@@ -36,6 +36,25 @@ def _get_window_position(page):
     }""")
 
 
+def _ensure_browser_focus(page):
+    """Принудительно фокусит окно браузера кликом по заголовку.
+    Работает даже когда pygetwindow.activate() не срабатывает."""
+    try:
+        info = page.evaluate("""() => ({
+            screenX: window.screenX,
+            screenY: window.screenY,
+            outerW: window.outerWidth,
+        })""")
+        title_x = int(info["screenX"] + info["outerW"] // 2)
+        title_y = int(info["screenY"]) + 5
+        pyautogui.click(title_x, title_y)
+        time.sleep(0.3)
+    except Exception:
+        _focus_browser_window(page)
+        page.bring_to_front()
+        time.sleep(0.3)
+
+
 def viewport_to_screen(page, vx, vy):
     info = _get_window_position(page)
     w_diff = info["outerW"] - info["innerW"]
@@ -77,10 +96,8 @@ def _focus_browser_window(page):
 
 def click_fallback(page, vx, vy):
     """Клик pyautogui по координатам viewport (vx, vy)."""
+    _ensure_browser_focus(page)
     sx, sy = viewport_to_screen(page, vx, vy)
-    _focus_browser_window(page)
-    page.bring_to_front()
-    time.sleep(0.2)
     pyautogui.moveTo(sx, sy, duration=0.2)
     time.sleep(0.1)
     pyautogui.click()
@@ -88,15 +105,12 @@ def click_fallback(page, vx, vy):
 
 
 def click_human_like(page, vx, vy):
-    """Человекоподобный клик pyautogui: jitter + кривая траектория + случайная задержка."""
-    cursor_before = pyautogui.position()
-    print(f"[CURSOR] перед кликом: ({cursor_before.x}, {cursor_before.y})")
+    """Человекоподобный клик pyautogui: jitter + кривая траектория + случайная задержка.
+    Перед кликом принудительно фокусит окно браузера через клик по заголовку."""
+    _ensure_browser_focus(page)
     jx = random.randint(-3, 3)
     jy = random.randint(-3, 3)
     sx, sy = viewport_to_screen(page, vx + jx, vy + jy)
-    _focus_browser_window(page)
-    page.bring_to_front()
-    time.sleep(0.2)
     dest_x = sx + random.randint(-2, 2)
     dest_y = sy + random.randint(-2, 2)
 
@@ -113,10 +127,8 @@ def click_human_like(page, vx, vy):
 
 def double_click_fallback(page, vx, vy):
     """Двойной клик pyautogui по координатам viewport (vx, vy)."""
+    _ensure_browser_focus(page)
     sx, sy = viewport_to_screen(page, vx, vy)
-    _focus_browser_window(page)
-    page.bring_to_front()
-    time.sleep(0.2)
     pyautogui.moveTo(sx, sy, duration=0.2)
     time.sleep(0.1)
     pyautogui.doubleClick()
@@ -125,8 +137,7 @@ def double_click_fallback(page, vx, vy):
 
 def type_fallback(page, text):
     """Побуквенный ввод через pyautogui.write() с переключением раскладки под кириллицу."""
-    cursor_before = pyautogui.position()
-    print(f"[CURSOR] перед type: ({cursor_before.x}, {cursor_before.y})")
+    _ensure_browser_focus(page)
     has_cyrillic = _has_cyrillic(text)
 
     if has_cyrillic:
@@ -173,11 +184,7 @@ def type_js_fallback(page, el_id, text):
 
 def press_fallback(page, key):
     """Нажимает клавишу через pyautogui."""
-    cursor_before = pyautogui.position()
-    print(f"[CURSOR] перед press '{key}': ({cursor_before.x}, {cursor_before.y})")
-    _focus_browser_window(page)
-    page.bring_to_front()
-    time.sleep(0.2)
+    _ensure_browser_focus(page)
     pyautogui.press(key)
     time.sleep(0.2)
 

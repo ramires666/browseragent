@@ -479,9 +479,21 @@ def solve(page, max_rounds=5):
         with Image.open(RECAPTCHA_SCREENSHOT_PATH) as img:
             shot_w, shot_h = img.size
         css_w, css_h = int(bframe_box["width"]), int(bframe_box["height"])
-        scale = max(1.0, shot_w / css_w) if css_w > 0 else 1.0
-        if abs(scale - 1.0) > 0.01:
-            print(f"[RECAPTCHA] скриншот {shot_w}x{shot_h} vs CSS {css_w}x{css_h}, scale={scale:.2f}")
+        # DPR браузера
+        dpr = page.evaluate("window.devicePixelRatio") or 1.0
+        # Системный масштаб Windows (GetScaleFactorForMonitor)
+        sys_scale = 1.0
+        try:
+            from ctypes import wintypes, byref, windll
+            pt = wintypes.POINT(0, 0)
+            mon = windll.user32.MonitorFromPoint(pt, 2)
+            factor = wintypes.UINT()
+            windll.shcore.GetScaleFactorForMonitor(mon, byref(factor))
+            sys_scale = factor.value / 100.0
+        except Exception:
+            pass
+        scale = max(dpr, sys_scale, shot_w / css_w if css_w > 0 else 1.0)
+        print(f"[RECAPTCHA] скриншот {shot_w}x{shot_h} vs CSS {css_w}x{css_h}, DPR={dpr:.2f}, sys_scale={sys_scale:.2f}, scale={scale:.2f}")
 
         print(f">>> ОТПРАВЛЯЮ ЗАПРОС В LLM challenge: \"{challenge_text}\"")
         result, raw = ask_llm_for_clicks(challenge_text, RECAPTCHA_SCREENSHOT_PATH, bframe_box)
@@ -532,13 +544,15 @@ def solve(page, max_rounds=5):
                 except (TypeError, ValueError):
                     print(f"[RECAPTCHA] клик {i} с некорректными координатами: {pt}, пропускаю")
                     continue
-                if fx > bw or fy > bh:
-                    print(f"[RECAPTCHA] коорд ({fx},{fy}) ВНЕ iframe ({bw}x{bh}) — использую как viewport")
-                    vx, vy = int(fx), int(fy)
-                else:
-                    vx = int(bframe_box["x"] + fx / scale)
-                    vy = int(bframe_box["y"] + fy / scale)
-                print(f"[RECAPTCHA] клик({fx},{fy}) {'*1/scale=' + str(round(1/scale,2)) if scale != 1.0 else ''} -> viewport({vx},{vy})")
+                # Конвертация: screenshot px -> CSS px через scale
+                cx = fx / scale
+                cy = fy / scale
+                if cx > bw or cy > bh or cx < 0 or cy < 0:
+                    print(f"[RECAPTCHA] коорд ({fx},{fy}) ВНЕ iframe ({bw}x{bh}) после scale={scale} -> CSS({cx:.0f},{cy:.0f}) — пропускаю")
+                    continue
+                vx = int(bframe_box["x"] + cx)
+                vy = int(bframe_box["y"] + cy)
+                print(f"[RECAPTCHA] клик({fx},{fy})/scale->CSS({cx:.0f},{cy:.0f})->viewport({vx},{vy})")
                 clicks_data.append({"x": vx, "y": vy})
         elif tiles:
             cols = result.get("grid_cols", 3)

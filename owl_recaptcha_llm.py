@@ -92,14 +92,18 @@ def _normalize_result(parsed):
 
 
 def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
+    from PIL import Image
     with open(screenshot_path, "rb") as f:
-        image_b64 = base64.b64encode(f.read()).decode("utf-8")
+        image_data = f.read()
+        image_b64 = base64.b64encode(image_data).decode("utf-8")
+    with Image.open(screenshot_path) as img:
+        img_w, img_h = img.size
     payload = {
         "model": "gui-owl",
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": [
-                {"type": "text", "text": "Return pixel coordinates of matching tiles."},
+                {"type": "text", "text": f"The image is {img_w}x{img_h} pixels. Grid is 3x3 tiles. Return tile center pixel coordinates WITHIN [0,{img_w}] x [0,{img_h}] bounds."},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
             ]}
         ],

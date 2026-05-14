@@ -463,6 +463,35 @@ def solve(page, max_rounds=5):
         print(f"[RECAPTCHA] ОТВЕТ LLM: {json.dumps(result, ensure_ascii=False, indent=2)}")
         _wait_step("ОТВЕТ LLM")
 
+        if isinstance(result, list):
+            print("[RECAPTCHA] LLM вернула список — обрабатываю как координаты")
+            clicks_data = []
+            for item in result:
+                if isinstance(item, (list, tuple)) and len(item) == 2:
+                    x, y = int(item[0]), int(item[1])
+                    vx = int(bframe_box["x"]) + x
+                    vy = int(bframe_box["y"]) + y
+                    print(f"[RECAPTCHA] coord({x},{y}) -> viewport({vx},{vy})")
+                    clicks_data.append({"x": vx, "y": vy})
+            if not clicks_data:
+                print("[RECAPTCHA] Нет совпавших плиток/кликов")
+                skip_btn = _get_skip_button(page)
+                if skip_btn:
+                    click_human_like(page, skip_btn[0], skip_btn[1])
+                _random_delay(0.5, 1)
+                continue
+            print(f"[RECAPTCHA] Совпало плиток: {len(clicks_data)}")
+            _wait_step("КЛИКИ ПО ПЛИТКАМ", f"{len(clicks_data)} кликов")
+            for i, pt in enumerate(clicks_data):
+                cx, cy = pt["x"], pt["y"]
+                print(f"[RECAPTCHA] Клик {i+1}/{len(clicks_data)} -> ({cx}, {cy})")
+                click_human_like(page, cx, cy)
+                if _debug():
+                    _wait_step(f"КЛИК {i+1}")
+                else:
+                    _random_delay(0.25, 0.7)
+            continue
+
         if result.get("done"):
             print("[RECAPTCHA] LLM: уже решено")
             return True

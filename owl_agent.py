@@ -74,7 +74,8 @@ def handle_google_block(page):
                     print("[GOOGLE BLOCK] Challenge появился!")
                     return True
 
-            print(f"[GOOGLE BLOCK] Challenge не появился. Попытка {attempt + 1}/3")
+            print(f"[GOOGLE BLOCK] Challenge не найден после клика (см. RECAPTCHA DEBUG FRAMES выше)")
+            print(f"[GOOGLE BLOCK] Попытка {attempt + 1}/3")
             continue
 
         print(f"[GOOGLE BLOCK] iframe не найден, попытка {attempt + 1}/3, жду 1с...")

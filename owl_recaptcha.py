@@ -81,7 +81,16 @@ def _find_anchor_frame(page):
 
 def _find_bframe(page):
     for frame in page.frames:
-        if "recaptcha/api2/bframe" in frame.url.lower():
+        url = frame.url.lower()
+        if "recaptcha/api2/bframe" in url:
+            return frame
+    for frame in page.frames:
+        url = frame.url.lower()
+        if "recaptcha" in url and "bframe" in url:
+            return frame
+    for frame in page.frames:
+        url = frame.url.lower()
+        if "recaptcha" in url and "anchor" not in url:
             return frame
     return None
 
@@ -258,16 +267,34 @@ def has_recaptcha_on_page(page):
     return _find_anchor_frame(page) is not None or _find_bframe(page) is not None
 
 
+def _debug_frames(page):
+    print("[RECAPTCHA DEBUG FRAMES] Все фреймы на странице:")
+    for i, f in enumerate(page.frames):
+        url = f.url[:120]
+        try:
+            el = f.frame_element()
+            box = el.bounding_box()
+            box_str = f"box=({box['x']:.0f},{box['y']:.0f} {box['width']:.0f}x{box['height']:.0f})" if box else "box=None"
+        except Exception:
+            box_str = "box=ERR"
+        print(f"  [{i}] {box_str} {url}")
+
+
 def is_recaptcha_challenge(page):
     """Проверяет, виден ли reCAPTCHA challenge (bframe). БЕЗ ПОБОЧНЫХ ЭФФЕКТОВ."""
     bframe = _find_bframe(page)
     if not bframe:
+        _debug_frames(page)
         return False
     try:
         box = bframe.frame_element().bounding_box()
-        if box and box["width"] >= 100 and box["height"] >= 100:
+        if box:
+            print(f"[RECAPTCHA] bframe box: {box['width']:.0f}x{box['height']:.0f} at ({box['x']:.0f},{box['y']:.0f})")
+        if box and box["width"] >= 50 and box["height"] >= 50:
             return True
-    except Exception:
+        print(f"[RECAPTCHA] bframe найден, но мал: {box['width']:.0f}x{box['height']:.0f} < 50x50")
+    except Exception as e:
+        print(f"[RECAPTCHA] bframe box error: {e}")
         pass
     return False
 

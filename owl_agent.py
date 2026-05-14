@@ -15,6 +15,7 @@ from owl_clicker import (
     click_human_like,
     double_click_fallback,
     type_fallback,
+    type_js_fallback,
     press_fallback,
     find_element_coords
 )
@@ -398,12 +399,14 @@ def do_action(page, action, elements, focused_id=None):
             time.sleep(0.3)
             ok2, reason = verify_action_via_screenshot(page, action)
             if not ok2:
-                print(f"[VERIFY] Текст не ввёлся: {reason}. Пробую ещё раз...")
+                print(f"[VERIFY] Текст не ввёлся: {reason}. Пробую JS fallback...")
                 time.sleep(0.5)
-                type_fallback(page, text)
-                time.sleep(0.3)
-                ok2, reason = verify_action_via_screenshot(page, action)
-                if not ok2:
+                js_ok = type_js_fallback(page, el_id, text)
+                if js_ok:
+                    ok2 = True
+                    print("[TYPE JS] успешно")
+                else:
+                    print("[TYPE JS] не сработал")
                     dom_val = page.evaluate(f"() => {{ const el = document.querySelector('[data-ai-id=\"{el_id}\"]'); return el ? el.value || el.textContent || '' : 'NO_EL' }}")
                     print(f"[DOM VERIFY] value элемента {el_id} = '{dom_val}'")
                     if dom_val and dom_val != 'NO_EL' and text.lower() in dom_val.lower():
@@ -413,7 +416,7 @@ def do_action(page, action, elements, focused_id=None):
                 print("[PYAUTOGUI] Enter после ввода текста")
                 press_fallback(page, "enter")
             else:
-                print("[PYAUTOGUI] Текст не ввёлся даже после повторной попытки — не нажимаю Enter")
+                print("[PYAUTOGUI] Текст не ввёлся — не нажимаю Enter")
             return False
         print(f"[PYAUTOGUI] DOM координат нет для {el_id}, пробую vision fallback...")
         ok = vision_fallback(page, action, elements, action_label=f"type into {el_id}")
@@ -422,11 +425,11 @@ def do_action(page, action, elements, focused_id=None):
             type_fallback(page, text)
             ok2, reason = verify_action_via_screenshot(page, action)
             if not ok2:
-                print(f"[VERIFY] Текст не ввёлся: {reason}. Пробую ещё раз...")
+                print(f"[VERIFY] Текст не ввёлся: {reason}. Пробую JS fallback...")
                 time.sleep(0.5)
-                type_fallback(page, text)
-                time.sleep(0.3)
-                ok2, reason = verify_action_via_screenshot(page, action)
+                js_ok = type_js_fallback(page, el_id, text)
+                if js_ok:
+                    ok2 = True
             if ok2:
                 print("[PYAUTOGUI] Enter после ввода текста")
                 press_fallback(page, "enter")

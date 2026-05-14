@@ -111,11 +111,30 @@ def type_fallback(page, text):
     try:
         pyperclip.copy(text)
         time.sleep(0.1)
+        clip_check = pyperclip.paste()
+        print(f"[TYPE] clipboard: '{clip_check[:30]}'")
         pyautogui.hotkey("ctrl", "v")
         time.sleep(0.3)
     except Exception as e:
         print(f"[TYPE] pyperclip failed ({e}), fallback to pyautogui.write()")
         pyautogui.write(text, interval=0.08)
+
+
+def type_js_fallback(page, el_id, text):
+    """Вставляет текст через JS (value + events). Запасной вариант когда pyautogui+clipboard не работает."""
+    print(f"[TYPE JS] устанавливаю value элемента {el_id} через DOM")
+    escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+    result = page.evaluate(f"""() => {{
+        const el = document.querySelector('[data-ai-id="{el_id}"]');
+        if (!el) return 'NO_EL';
+        el.focus();
+        el.value = '{escaped}';
+        el.dispatchEvent(new Event('input', {{bubbles: true, cancelable: true}}));
+        el.dispatchEvent(new Event('change', {{bubbles: true, cancelable: true}}));
+        return el.value;
+    }}""")
+    print(f"[TYPE JS] результат: '{result}'")
+    return result == text
 
 
 def press_fallback(page, key):

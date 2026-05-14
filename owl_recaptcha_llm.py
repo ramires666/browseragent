@@ -1,8 +1,7 @@
 import json
 import base64
 import re
-import requests
-from owl_llm import API_URL, API_KEY
+from owl_llm_client import get_config, make_request
 
 SYSTEM_PROMPT = """Look at the screenshot. Find ALL objects that match the instruction.
 Return pixel coordinates (x,y) center of each matching object.
@@ -180,24 +179,17 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
     with Image.open(screenshot_path) as img:
         img_w, img_h = img.size
 
-    headers = {}
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
+    _model = get_config()["model"]
 
     def _make_request(current_payload):
-        try:
-            r = requests.post(API_URL, json=current_payload, headers=headers, timeout=180)
-            print(f"[RECAPTCHA STATUS] {r.status_code}")
-            r.raise_for_status()
-            data = r.json()
-            raw = (data["choices"][0]["message"].get("content") or "").strip()
-            if not raw:
-                raw = (data["choices"][0]["message"].get("reasoning_content") or "").strip()
-            print(f"[RECAPTCHA RAW] {raw[:500]}")
-            return raw
-        except Exception as e:
-            print(f"[RECAPTCHA] Ошибка запроса: {e}")
+        data = make_request(current_payload, tag="RECAPTCHA")
+        if not data:
             return None
+        raw = (data["choices"][0]["message"].get("content") or "").strip()
+        if not raw:
+            raw = (data["choices"][0]["message"].get("reasoning_content") or "").strip()
+        print(f"[RECAPTCHA RAW] {raw[:500]}")
+        return raw
 
     def _build_payload(correction_msg=None):
         msgs = [
@@ -210,7 +202,7 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
         if correction_msg:
             msgs.append({"role": "user", "content": correction_msg})
         return {
-            "model": "gui-owl",
+            "model": _model,
             "messages": msgs,
             "temperature": 0.1,
             "max_tokens": 4000,
@@ -256,7 +248,7 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
         f"Image is {img_w}x{img_h}px. Use 0-1000 coordinate space."
     )
     payload3 = {
-        "model": "gui-owl",
+        "model": _model,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": [
@@ -286,8 +278,9 @@ def find_challenge_via_screenshot(page, full_screenshot_path):
     with open(full_screenshot_path, "rb") as f:
         image_b64 = base64.b64encode(f.read()).decode("utf-8")
     viewport = page.viewport_size
+    _model = get_config()["model"]
     payload = {
-        "model": "gui-owl",
+        "model": _model,
         "messages": [
             {"role": "system", "content": "Return ONLY JSON: {\"found\":true} or {\"found\":false}."},
             {"role": "user", "content": [
@@ -299,13 +292,11 @@ def find_challenge_via_screenshot(page, full_screenshot_path):
         "max_tokens": 500,
         "stream": False,
     }
-    headers = {}
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
     try:
-        r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
-        r.raise_for_status()
-        raw = r.json()["choices"][0]["message"].get("content") or ""
+        data = make_request(payload, tag="RECAPTCHA")
+        if not data:
+            return False
+        raw = data["choices"][0]["message"].get("content") or ""
         parsed = _extract_json(raw)
         return parsed.get("found") if parsed else False
     except Exception:

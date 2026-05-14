@@ -1,13 +1,14 @@
 import json
 import os
 import base64
-import requests
 from dotenv import load_dotenv
+from owl_llm_client import get_config, make_request
 
 load_dotenv()
 
-API_KEY = os.getenv("LLM_API_KEY", "")
-API_URL = os.getenv("API_URL", "http://127.0.0.1:8080/v1/chat/completions")
+_cfg = get_config()
+API_KEY = _cfg["api_key"]
+API_URL = _cfg["url"]
 SCREENSHOT_PATH = os.getenv("SCREENSHOT_PATH", r"W:\_python\OWL\browser_screen.jpg")
 SYSTEM_PROMPT_PATH = os.getenv("SYSTEM_PROMPT_PATH", "system_prompt.txt")
 JSON_SCHEMA_ENABLED = os.getenv("JSON_SCHEMA_ENABLED", "").lower() in ("1", "true", "yes")
@@ -107,7 +108,6 @@ def build_history_text(history):
 
 def _ask_model_to_fix_json(bad_text):
     """Просит модель извлечь валидный JSON из своего же некорректного ответа."""
-    import requests as req
     fix_prompt = f"""The following text was supposed to be valid JSON but is not. Extract ONLY the valid JSON part. If there is no valid JSON, try to fix it by completing it properly.
 
 Text:
@@ -128,14 +128,11 @@ Return ONLY the corrected JSON, no explanations."""
         "stream": False,
     }
 
-    headers = {}
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
-
     try:
-        r = req.post(API_URL, json=payload, headers=headers, timeout=120)
-        r.raise_for_status()
-        msg = r.json()["choices"][0]["message"]
+        data = make_request(payload, timeout=120, tag="REPAIR")
+        if not data:
+            return ""
+        msg = data["choices"][0]["message"]
         fixed = (msg.get("content") or msg.get("reasoning_content") or "").strip()
         brace = fixed.find("{")
         if brace >= 0:
@@ -188,6 +185,8 @@ Visible interactive elements:
         "stream": False,
     }
 
+    payload["model"] = payload.get("model") or "gui-owl"
+
     if JSON_SCHEMA_ENABLED:
         payload["response_format"] = {
             "type": "json_schema",
@@ -214,14 +213,11 @@ Visible interactive elements:
         }
         print("[JSON_SCHEMA] response_format включён")
 
-    headers = {}
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
+    data = make_request(payload, timeout=180, tag="MODEL")
+    if not data:
+        print("[ERROR] Модель не вернула ответ")
+        return ""
 
-    r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
-    print("[MODEL STATUS]", r.status_code)
-    r.raise_for_status()
-    data = r.json()
     msg = data["choices"][0]["message"]
     raw = (msg.get("content") or "").strip()
     if not raw:
@@ -233,7 +229,6 @@ Visible interactive elements:
 
     if not raw:
         print("[ERROR] Модель вернула пустой ответ")
-        print("[MODEL BODY]", r.text[:500])
         return ""
 
     brace = raw.find("{")

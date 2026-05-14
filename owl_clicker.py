@@ -37,22 +37,13 @@ def _get_window_position(page):
 
 
 def _ensure_browser_focus(page):
-    """Принудительно фокусит окно браузера кликом по заголовку.
-    Работает даже когда pygetwindow.activate() не срабатывает."""
+    """Фокусит окно через CDP + Win32 без кликов."""
     try:
-        info = page.evaluate("""() => ({
-            screenX: window.screenX,
-            screenY: window.screenY,
-            outerW: window.outerWidth,
-        })""")
-        title_x = int(info["screenX"] + info["outerW"] // 2)
-        title_y = int(info["screenY"]) + 5
-        pyautogui.click(title_x, title_y)
-        time.sleep(0.3)
-    except Exception:
-        _focus_browser_window(page)
         page.bring_to_front()
-        time.sleep(0.3)
+    except Exception:
+        pass
+    _focus_browser_window(page)
+    time.sleep(0.2)
 
 
 def viewport_to_screen(page, vx, vy):

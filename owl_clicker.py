@@ -89,6 +89,8 @@ def click_fallback(page, vx, vy):
 
 def click_human_like(page, vx, vy):
     """Человекоподобный клик pyautogui: jitter + кривая траектория + случайная задержка."""
+    cursor_before = pyautogui.position()
+    print(f"[CURSOR] перед кликом: ({cursor_before.x}, {cursor_before.y})")
     jx = random.randint(-3, 3)
     jy = random.randint(-3, 3)
     sx, sy = viewport_to_screen(page, vx + jx, vy + jy)
@@ -123,6 +125,8 @@ def double_click_fallback(page, vx, vy):
 
 def type_fallback(page, text):
     """Побуквенный ввод через pyautogui.write() с переключением раскладки под кириллицу."""
+    cursor_before = pyautogui.position()
+    print(f"[CURSOR] перед type: ({cursor_before.x}, {cursor_before.y})")
     has_cyrillic = _has_cyrillic(text)
 
     if has_cyrillic:
@@ -169,6 +173,8 @@ def type_js_fallback(page, el_id, text):
 
 def press_fallback(page, key):
     """Нажимает клавишу через pyautogui."""
+    cursor_before = pyautogui.position()
+    print(f"[CURSOR] перед press '{key}': ({cursor_before.x}, {cursor_before.y})")
     _focus_browser_window(page)
     page.bring_to_front()
     time.sleep(0.2)

@@ -7,6 +7,8 @@ from owl_llm import API_URL, API_KEY
 RECAPTCHA_SYSTEM_PROMPT = """
 You are solving a reCAPTCHA image challenge. Look at the screenshot: it shows a grid of square images and a challenge instruction at the top.
 
+IMPORTANT: Output ONLY raw JSON. Do NOT include thinking, reasoning, explanations, or any text before or after the JSON.
+
 Your job:
 1. Read the challenge instruction (e.g. "select all squares with traffic lights" or "select all images with a fire hydrant")
 2. Look at EVERY image in the grid carefully
@@ -33,6 +35,8 @@ CRITICAL RULES FOR SPLIT-OBJECT CHALLENGES:
 
 FIND_CHALLENGE_PROMPT = """
 You are looking at a screenshot of a webpage that may have a reCAPTCHA challenge visible.
+
+IMPORTANT: Output ONLY raw JSON. Do NOT include thinking, reasoning, or any text before or after the JSON.
 
 The reCAPTCHA challenge looks like a grid of images (3x3 or 4x4) with a text instruction at the top
 like "Select all squares with traffic lights" or similar. There is also a "Verify" or "Skip" button.
@@ -106,14 +110,45 @@ def _llm_request(payload, label):
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            repaired = _repair_json(raw)
-            if repaired != raw:
-                try:
-                    return json.loads(repaired)
-                except json.JSONDecodeError:
-                    pass
-            print(f"[{label}] Невалидный JSON: {raw[:300]}")
-            return None
+            pass
+
+        repaired = _repair_json(raw)
+        if repaired != raw:
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
+
+        brace_start = raw.find("{")
+        if brace_start >= 0:
+            json_part = raw[brace_start:]
+            try:
+                return json.loads(json_part)
+            except json.JSONDecodeError:
+                repaired2 = _repair_json(json_part)
+                if repaired2 != json_part:
+                    try:
+                        return json.loads(repaired2)
+                    except json.JSONDecodeError:
+                        pass
+
+        print(f"[{label}] Невалидный JSON: {raw[:300]}")
+        print(f"[{label}] Полный ответ ({len(raw)} символов), ищу JSON...")
+        import re
+        json_matches = re.findall(r'\{[^{}]*\}', raw, re.DOTALL)
+        for m in json_matches:
+            try:
+                return json.loads(m)
+            except json.JSONDecodeError:
+                pass
+        longer = re.findall(r'\{(?:[^{}]|(?:\{[^{}]*\}))*\}', raw, re.DOTALL)
+        for m in longer:
+            try:
+                return json.loads(m)
+            except json.JSONDecodeError:
+                pass
+
+        return None
     except Exception as e:
         print(f"[{label}] Ошибка запроса: {e}")
         return None
@@ -147,7 +182,7 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
             }
         ],
         "temperature": 0.1,
-        "max_tokens": 1200,
+        "max_tokens": 2500,
         "stream": False,
     }
 
@@ -176,7 +211,7 @@ def find_challenge_via_screenshot(page, full_screenshot_path):
             }
         ],
         "temperature": 0.1,
-        "max_tokens": 1200,
+        "max_tokens": 2500,
         "stream": False,
     }
 

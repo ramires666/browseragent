@@ -10,6 +10,7 @@ API_KEY = os.getenv("LLM_API_KEY", "")
 API_URL = os.getenv("API_URL", "http://127.0.0.1:8080/v1/chat/completions")
 SCREENSHOT_PATH = os.getenv("SCREENSHOT_PATH", r"W:\_python\OWL\browser_screen.jpg")
 SYSTEM_PROMPT_PATH = os.getenv("SYSTEM_PROMPT_PATH", "system_prompt.txt")
+JSON_SCHEMA_ENABLED = os.getenv("JSON_SCHEMA_ENABLED", "").lower() in ("1", "true", "yes")
 
 _SYSTEM_PROMPT_HARDCODED = """\
 You are a browser automation agent.
@@ -106,7 +107,10 @@ Visible interactive elements:
         "temperature": 0.1,
         "max_tokens": 300,
         "stream": False,
-        "response_format": {
+    }
+
+    if JSON_SCHEMA_ENABLED:
+        payload["response_format"] = {
             "type": "json_schema",
             "json_schema": {
                 "name": "browser_action",
@@ -129,7 +133,7 @@ Visible interactive elements:
                 }
             }
         }
-    }
+        print("[JSON_SCHEMA] response_format включён")
 
     headers = {}
     if API_KEY:

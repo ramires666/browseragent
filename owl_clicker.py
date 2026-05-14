@@ -95,10 +95,9 @@ def double_click_fallback(page, vx, vy):
 
 
 def type_fallback(page, text):
-    """Печатает текст через pyautogui (предварительно фокусит окно браузера)."""
-    _focus_browser_window(page)
-    time.sleep(0.2)
-    pyautogui.write(text, interval=0.05)
+    """Печатает текст через pyautogui в текущем активном элементе."""
+    time.sleep(0.3)
+    pyautogui.write(text, interval=0.08)
 
 
 def press_fallback(page, key):

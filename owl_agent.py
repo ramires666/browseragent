@@ -296,11 +296,13 @@ def do_action(page, action, elements):
         if coords:
             print(f"[PYAUTOGUI] type into {el_id} at viewport ({coords[0]}, {coords[1]})")
             click_human_like(page, coords[0], coords[1])
+            time.sleep(0.5)
             type_fallback(page, text)
         else:
             print(f"[PYAUTOGUI] Element {el_id} not in DOM — vision fallback...")
             ok = vision_fallback(page, action, elements, action_label=f"type into {el_id}")
             if ok:
+                time.sleep(0.5)
                 type_fallback(page, text)
             else:
                 print(f"[PYAUTOGUI] Vision не помогла — ошибка")

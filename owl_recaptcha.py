@@ -445,7 +445,6 @@ def solve(page, max_rounds=5):
 
     for round_idx in range(max_rounds):
         print(f"\n{'─' * 55}\n  РАУНД {round_idx + 1}/{max_rounds}\n{'─' * 55}")
-        _wait_step("ПРОВЕРКА РЕШЕНИЯ")
 
         if _is_solved(page):
             print("[RECAPTCHA] Уже решено!")
@@ -453,7 +452,6 @@ def solve(page, max_rounds=5):
 
         challenge_text = get_challenge_text(page)
         print(f"[RECAPTCHA] Текст: \"{challenge_text}\"")
-        _wait_step("ТЕКСТ ЗАДАНИЯ", f"\"{challenge_text}\"")
 
         if not challenge_text:
             print("[RECAPTCHA] Текст не получен, жду 1с...")
@@ -476,10 +474,8 @@ def solve(page, max_rounds=5):
             print("[RECAPTCHA] bframe невидим — челлендж пропал, перезапускаю")
             return False
         bframe_el.screenshot(path=RECAPTCHA_SCREENSHOT_PATH, type="jpeg", quality=95)
-        _wait_step("СКРИНШОТ", f"Файл: {RECAPTCHA_SCREENSHOT_PATH}")
 
         print(f">>> ОТПРАВЛЯЮ ЗАПРОС В LLM challenge: \"{challenge_text}\"")
-        _wait_step("ПЕРЕД ЗАПРОСОМ К LLM")
         result, raw = ask_llm_for_clicks(challenge_text, RECAPTCHA_SCREENSHOT_PATH, bframe_box)
 
         if not result:

@@ -597,7 +597,7 @@ def solve(page, max_rounds=5):
 
         if RECAPTCHA_DEBUG:
             _wait_step("ОЖИДАНИЕ 2.5с", "Жду 2.5 секунды для проверки результата...")
-        time.sleep(2.5)
+        time.sleep(3)
 
         if _is_solved(page):
             print("[RECAPTCHA] ✅ РЕШЕНО!")
@@ -605,23 +605,33 @@ def solve(page, max_rounds=5):
             return True
 
         incorrect = False
+        bframe_still_alive = False
         try:
             bf = _find_bframe(page)
             if bf:
+                bframe_still_alive = True
                 incorrect = bf.evaluate("""() => {
                     const el = document.querySelector('.rc-imageselect-incorrect-response');
                     return el && el.style.display !== 'none';
                 }""")
         except Exception:
             pass
+
         if incorrect:
             print("[RECAPTCHA] ❌ Неправильный ответ")
             _wait_step("НЕВЕРНО", "Модель выбрала не те плитки. Нажми Enter чтобы попробовать снова")
             _random_delay(0.8, 1.5)
             continue
 
-        _wait_step("НЕИЗВЕСТНЫЙ РЕЗУЛЬТАТ",
-                    "Капча не решена, но и ошибка не показана. Возможно, нужно больше времени. Продолжить?")
+        if bframe_still_alive:
+            print("[RECAPTCHA] 🔄 Challenge обновился — новые картинки! Анализирую заново...")
+            _wait_step("ОБНОВЛЕНИЕ КАРТИНОК",
+                        "После verify появились новые/другие картинки. Начинаю новый раунд.")
+            time.sleep(1)
+            continue
+
+        _wait_step("BFREAME ПРОПАЛ",
+                    "bframe больше нет на странице — возможно решено или страница изменилась. Продолжить?")
 
     print("[RECAPTCHA] Достигнут лимит попыток")
     return False

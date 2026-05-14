@@ -1,56 +1,62 @@
 import json
 import base64
+import re
 import requests
 from owl_llm import API_URL, API_KEY
 
-SYSTEM_PROMPT = """Return ONLY raw JSON. No thinking, no explanations.
+SYSTEM_PROMPT = """Look at the reCAPTCHA screenshot. Find ALL tiles that match the instruction.
+Return pixel coordinates (x,y) center of each matching tile.
 
-Look at the reCAPTCHA screenshot. Find ALL tiles that match the instruction.
-Return the (x,y) pixel center of each matching tile.
-
-FORMAT (copy exactly):
+FORMAT:
 {"clicks":[{"x":100,"y":200},{"x":300,"y":200}],"reason":"why"}
 
-Rules:
-- Coordinates in screenshot pixels, (0,0) = top-left
-- Every tile that matches = one entry in clicks
-- If no matches: {"clicks":[],"skip":true}
-- If already solved: {"done":true}
-- Return ONLY the JSON, nothing before or after"""
+If no matches: {"clicks":[],"skip":true}
+If done: {"done":true}"""
 
 
-def _llm_request(payload):
-    headers = {}
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
-    raw = None
+def _extract_json(raw):
+    brace = raw.find("{")
+    if brace < 0:
+        return None
+    trimmed = raw[brace:]
+    close = trimmed.rfind("}")
+    if close >= 0:
+        trimmed = trimmed[:close + 1]
     try:
-        r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
-        print(f"[RECAPTCHA STATUS] {r.status_code}")
-        r.raise_for_status()
-        data = r.json()
-        raw = (data["choices"][0]["message"].get("content") or "").strip()
-        if not raw:
-            raw = (data["choices"][0]["message"].get("reasoning_content") or "").strip()
-        print(f"[RECAPTCHA RAW] {raw[:300]}")
-        if not raw:
-            return None, raw
-        brace = raw.find("{")
-        if brace >= 0:
-            raw_trimmed = raw[brace:]
-        else:
-            raw_trimmed = raw
-        close = raw_trimmed.rfind("}")
-        if close >= 0:
-            raw_trimmed = raw_trimmed[:close + 1]
-        result = json.loads(raw_trimmed)
-        if not isinstance(result, dict) or "clicks" not in result:
-            print(f"[RECAPTCHA] Нет поля 'clicks' в ответе")
-            return None, raw
-        return result, raw
-    except Exception as e:
-        print(f"[RECAPTCHA] Ошибка: {e}")
-        return None, raw
+        return json.loads(trimmed)
+    except json.JSONDecodeError:
+        return None
+
+
+def _parse_reasoning(raw):
+    """Парсит reasoning-текст: ищет (Contains ...) с Row/Col.
+    Возвращает {"tiles": [...], "grid_cols": N, "grid_rows": M} или None."""
+    grid = re.search(r'(\d+)\s*x\s*(\d+).*?grid', raw, re.IGNORECASE)
+    if not grid:
+        grid = re.search(r'(?:grid|is)\s*(\d+)\s*x\s*(\d+)', raw, re.IGNORECASE)
+    rows = int(grid.group(1)) if grid else 3
+    cols = int(grid.group(2)) if grid else 3
+
+    indices = set()
+    for line in raw.split("\n"):
+        has_contains = re.search(r'\(Contains', line, re.IGNORECASE)
+        if not has_contains:
+            continue
+        rc = re.search(r'[Rr]ow\s*(\d+)\s*[,;:].*?[Cc]ol(?:umn)?\s*(\d+)', line)
+        if rc:
+            r, c = int(rc.group(1)) - 1, int(rc.group(2)) - 1
+            if 0 <= r < rows and 0 <= c < cols:
+                indices.add(r * cols + c)
+            continue
+        cell = re.search(r'[Cc]ell\s*\((\d+)\s*,\s*(\d+)\)', line)
+        if cell:
+            r, c = int(cell.group(1)), int(cell.group(2))
+            if 0 <= r < rows and 0 <= c < cols:
+                indices.add(r * cols + c)
+
+    if indices:
+        return {"tiles": sorted(indices), "grid_cols": cols, "grid_rows": rows}
+    return None
 
 
 def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
@@ -69,23 +75,35 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
         "max_tokens": 4000,
         "stream": False,
     }
+    headers = {}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
+    try:
+        r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
+        print(f"[RECAPTCHA STATUS] {r.status_code}")
+        r.raise_for_status()
+        data = r.json()
+        raw = (data["choices"][0]["message"].get("content") or "").strip()
+        if not raw:
+            raw = (data["choices"][0]["message"].get("reasoning_content") or "").strip()
+        print(f"[RECAPTCHA RAW] {raw[:500]}")
+        if not raw:
+            return None, None
 
-    for attempt in range(5):
-        result, raw = _llm_request(payload)
-        if result:
-            return result
-        print(f"[RECAPTCHA] Попытка {attempt+1}: невалидный формат, отправляю на доработку...")
-        correction = (
-            f"Your response was NOT valid JSON with 'clicks' field.\n"
-            f"Your raw response:\n{raw}\n\n"
-            f"Return ONLY this exact format with pixel coordinates:\n"
-            f"{{\"clicks\":[{{\"x\":100,\"y\":200}},{{\"x\":300,\"y\":200}}],\"reason\":\"why\"}}"
-        )
-        payload["messages"].append({"role": "assistant", "content": raw or "no response"})
-        payload["messages"].append({"role": "user", "content": correction})
+        parsed = _extract_json(raw)
+        if parsed and isinstance(parsed, dict) and "clicks" in parsed:
+            print("[RECAPTCHA] Найден JSON с clicks")
+            return parsed, None
 
-    print("[RECAPTCHA] 5 попыток — не удалось получить корректный JSON")
-    return None
+        print("[RECAPTCHA] JSON без clicks, парсю reasoning...")
+        reasoning = _parse_reasoning(raw)
+        if reasoning:
+            print(f"[RECAPTCHA] Reasoning parsed: tiles={reasoning['tiles']} grid={reasoning['grid_cols']}x{reasoning['grid_rows']}")
+            return reasoning, raw
+        return None, raw
+    except Exception as e:
+        print(f"[RECAPTCHA] Ошибка: {e}")
+        return None, None
 
 
 def find_challenge_via_screenshot(page, full_screenshot_path):
@@ -96,9 +114,9 @@ def find_challenge_via_screenshot(page, full_screenshot_path):
     payload = {
         "model": "gui-owl",
         "messages": [
-            {"role": "system", "content": "Return ONLY JSON: {\"found\":true} or {\"found\":false}. No text."},
+            {"role": "system", "content": "Return ONLY JSON: {\"found\":true} or {\"found\":false}."},
             {"role": "user", "content": [
-                {"type": "text", "text": f"Is there a reCAPTCHA challenge grid visible in this {viewport['width']}x{viewport['height']} screenshot?"},
+                {"type": "text", "text": f"reCAPTCHA challenge visible? viewport {viewport['width']}x{viewport['height']}"},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
             ]}
         ],
@@ -106,14 +124,18 @@ def find_challenge_via_screenshot(page, full_screenshot_path):
         "max_tokens": 500,
         "stream": False,
     }
-    result, _ = _llm_request(payload)
-    return result and result.get("found")
+    headers = {}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
+    try:
+        r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
+        r.raise_for_status()
+        raw = r.json()["choices"][0]["message"].get("content") or ""
+        parsed = _extract_json(raw)
+        return parsed.get("found") if parsed else False
+    except Exception:
+        return False
 
 
 def detect_recaptcha_via_vision(page, screenshot_path):
-    result = find_challenge_via_screenshot(page, screenshot_path)
-    if result:
-        print("[RECAPTCHA VISION] challenge найден!")
-        return True
-    print("[RECAPTCHA VISION] challenge не найден")
-    return False
+    return find_challenge_via_screenshot(page, screenshot_path)

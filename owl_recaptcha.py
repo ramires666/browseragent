@@ -472,7 +472,7 @@ def solve(page, max_rounds=5):
 
         print(f">>> ОТПРАВЛЯЮ ЗАПРОС В LLM challenge: \"{challenge_text}\"")
         _wait_step("ПЕРЕД ЗАПРОСОМ К LLM")
-        result = ask_llm_for_clicks(challenge_text, RECAPTCHA_SCREENSHOT_PATH, bframe_box)
+        result, raw = ask_llm_for_clicks(challenge_text, RECAPTCHA_SCREENSHOT_PATH, bframe_box)
 
         if not result:
             print("[RECAPTCHA] LLM не вернула результат")
@@ -496,17 +496,31 @@ def solve(page, max_rounds=5):
             continue
 
         raw_clicks = result.get("clicks") or []
-        if not raw_clicks:
-            print("[RECAPTCHA] Нет совпавших плиток")
-            skip_btn = _get_skip_button(page)
-            if skip_btn:
-                click_human_like(page, skip_btn[0], skip_btn[1])
-            _random_delay(0.5, 1)
-            continue
-
+        tiles = result.get("tiles") or []
         clicks_data = []
-        for pt in raw_clicks:
-            vx = int(bframe_box["x"] + pt["x"])
+
+        if raw_clicks:
+            for pt in raw_clicks:
+                vx = int(bframe_box["x"] + pt["x"])
+                vy = int(bframe_box["y"] + pt["y"])
+                print(f"[RECAPTCHA] screenshot_click({pt['x']},{pt['y']}) -> viewport({vx},{vy})")
+                clicks_data.append({"x": vx, "y": vy})
+        elif tiles:
+            cols = result.get("grid_cols", 3)
+            rows = result.get("grid_rows", 3)
+            bw = int(bframe_box["width"])
+            bh = int(bframe_box["height"])
+            cw = bw // cols
+            ch = bh // rows
+            for idx in tiles:
+                col = idx % cols
+                row = idx // cols
+                vx = int(bframe_box["x"]) + col * cw + cw // 2
+                vy = int(bframe_box["y"]) + row * ch + ch // 2
+                print(f"[RECAPTCHA] tile {idx} (row={row} col={col}) -> viewport({vx},{vy})")
+                clicks_data.append({"x": vx, "y": vy})
+
+        if not clicks_data:
             vy = int(bframe_box["y"] + pt["y"])
             print(f"[RECAPTCHA] screenshot_click({pt['x']},{pt['y']}) -> viewport({vx},{vy})")
             clicks_data.append({"x": vx, "y": vy})

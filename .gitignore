@@ -6,3 +6,4 @@ __pycache__/
 venv/
 .venv/
 browser_screen.jpg
+_recaptcha_challenge.jpg

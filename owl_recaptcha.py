@@ -216,6 +216,27 @@ def _tiles_to_clicks(raw_tiles, result, bframe_box, page):
             clicks.append({"x": vp_x, "y": vp_y, "index": idx})
         return clicks
 
+    gpb = result.get("grid_pixel_boundaries") if result else None
+    cs = result.get("cell_size") if result else None
+    if gpb and cs and cs.get("width") and cs.get("height"):
+        print(f"[RECAPTCHA] grid_pixel_boundaries: {gpb} cell_size: {cs}")
+        sx_w = bframe_box["width"]
+        sx_h = bframe_box["height"]
+        cols = max(1, round(gpb["width"] / cs["width"]))
+        rows = max(1, round(gpb["height"] / cs["height"]))
+        print(f"[RECAPTCHA] вычислено: cols={cols} rows={rows}")
+        clicks = []
+        for idx in raw_tiles:
+            col = idx % cols
+            row = idx // cols
+            scr_x = gpb["x"] + col * cs["width"] + cs["width"] // 2
+            scr_y = gpb["y"] + row * cs["height"] + cs["height"] // 2
+            vp_x = int(bframe_box["x"] + scr_x)
+            vp_y = int(bframe_box["y"] + scr_y)
+            print(f"[RECAPTCHA] tile {idx} (row={row} col={col}): screenshot_center({scr_x},{scr_y}) -> viewport({vp_x},{vp_y})")
+            clicks.append({"x": vp_x, "y": vp_y, "index": idx})
+        return clicks
+
     tiles = _get_tiles(page)
     if not tiles:
         print("[RECAPTCHA] tiles_to_clicks: не могу получить плитки, возвращаю индексы как есть")
@@ -403,7 +424,7 @@ def solve(page, max_rounds=5):
             _random_delay(0.5, 1)
             continue
 
-        raw_tiles = result.get("tiles", result.get("clicks", [])) or []
+        raw_tiles = (result.get("tiles") or result.get("tile_indices") or result.get("clicks") or [])
         if not raw_tiles:
             print("[RECAPTCHA] Нет совпавших плиток/кликов")
             skip_btn = _get_skip_button(page)

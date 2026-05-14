@@ -106,12 +106,13 @@ def double_click_fallback(page, vx, vy):
 
 def type_fallback(page, text):
     """Вставляет текст через Ctrl+V (буфер обмена). Надёжнее чем pyautogui.write() для Unicode/кириллицы."""
+    _focus_browser_window(page)
     time.sleep(0.3)
     try:
         pyperclip.copy(text)
         time.sleep(0.1)
         pyautogui.hotkey("ctrl", "v")
-        time.sleep(0.2)
+        time.sleep(0.3)
     except Exception as e:
         print(f"[TYPE] pyperclip failed ({e}), fallback to pyautogui.write()")
         pyautogui.write(text, interval=0.08)

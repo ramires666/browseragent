@@ -179,9 +179,9 @@ Look at the screenshot carefully and verify if the action succeeded.
 - For pressing a key: did the expected change happen?
 
 Return ONLY valid JSON:
-{{"ok":true,"reason":"the element is now focused"}}
+{"ok":true,"reason":"the element is now focused"}
 or
-{{"ok":false,"reason":"the click missed, element is not focused"}}
+{"ok":false,"reason":"the click missed, element is not focused"}
 """
 
 
@@ -401,8 +401,19 @@ def do_action(page, action, elements, focused_id=None):
                 print(f"[VERIFY] Текст не ввёлся: {reason}. Пробую ещё раз...")
                 time.sleep(0.5)
                 type_fallback(page, text)
-            print("[PYAUTOGUI] Enter после ввода текста")
-            press_fallback(page, "enter")
+                time.sleep(0.3)
+                ok2, reason = verify_action_via_screenshot(page, action)
+                if not ok2:
+                    dom_val = page.evaluate(f"() => {{ const el = document.querySelector('[data-ai-id=\"{el_id}\"]'); return el ? el.value || el.textContent || '' : 'NO_EL' }}")
+                    print(f"[DOM VERIFY] value элемента {el_id} = '{dom_val}'")
+                    if dom_val and dom_val != 'NO_EL' and text.lower() in dom_val.lower():
+                        print("[DOM VERIFY] текст найден в DOM — считаем успехом")
+                        ok2 = True
+            if ok2:
+                print("[PYAUTOGUI] Enter после ввода текста")
+                press_fallback(page, "enter")
+            else:
+                print("[PYAUTOGUI] Текст не ввёлся даже после повторной попытки — не нажимаю Enter")
             return False
         print(f"[PYAUTOGUI] DOM координат нет для {el_id}, пробую vision fallback...")
         ok = vision_fallback(page, action, elements, action_label=f"type into {el_id}")
@@ -414,8 +425,11 @@ def do_action(page, action, elements, focused_id=None):
                 print(f"[VERIFY] Текст не ввёлся: {reason}. Пробую ещё раз...")
                 time.sleep(0.5)
                 type_fallback(page, text)
-            print("[PYAUTOGUI] Enter после ввода текста")
-            press_fallback(page, "enter")
+                time.sleep(0.3)
+                ok2, reason = verify_action_via_screenshot(page, action)
+            if ok2:
+                print("[PYAUTOGUI] Enter после ввода текста")
+                press_fallback(page, "enter")
         else:
             print(f"[PYAUTOGUI] Ничего не помогло — ошибка")
             raise

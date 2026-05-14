@@ -19,6 +19,41 @@ from owl_clicker import (
 )
 
 
+CAPTCHA_KEYWORDS = [
+    "captcha", "recaptcha", "verify you're human", "verify your identity",
+    "i'm not a robot", "i am not a robot", "security check",
+    "подтвердите", "капча", "рекапча", "не робот", "проверка безопасности",
+    "человек", "антибот", "пожалуйста, подтвердите"
+]
+
+
+def page_text(page):
+    try:
+        return page.evaluate("() => document.body?.innerText?.slice(0, 3000) || ''")
+    except Exception:
+        return ""
+
+
+def detect_captcha(page, elements):
+    text = page_text(page)
+    lower_text = text.lower()
+
+    for kw in CAPTCHA_KEYWORDS:
+        if kw in lower_text:
+            print(f"  [CAPTCHA TRIGGER] найдено: \"{kw}\"")
+            return True
+
+    for el in elements:
+        for field in ("text", "label"):
+            val = (el.get(field) or "").lower()
+            for kw in CAPTCHA_KEYWORDS:
+                if kw in val:
+                    print(f"  [CAPTCHA TRIGGER] элемент {el['id']}: \"{kw}\"")
+                    return True
+
+    return False
+
+
 def same_action(a, b):
     if not a or not b:
         return False
@@ -96,6 +131,14 @@ def main():
         print("Пустая задача.")
         return
 
+    print("\n" + "█" * 55)
+    print("  SYSTEM PROMPT (инструкция модели):")
+    print("█" * 55)
+    from owl_llm import SYSTEM_PROMPT as sp
+    for line in sp.strip().splitlines():
+        print(f"  {line}")
+    print("█" * 55 + "\n")
+
     history = []
     last_action = None
     repeat_count = 0
@@ -118,6 +161,7 @@ def main():
 
             page.screenshot(path=SCREENSHOT_PATH, type="jpeg", quality=85, full_page=False)
 
+            print(f"\n>>> ОТПРАВЛЯЮ ПРОМПТ | Задача: \"{task}\" | Элементов: {len(elements)} | История: {len(history)} шагов")
             raw = ask_model(
                 task=task,
                 screenshot_path=SCREENSHOT_PATH,
@@ -136,6 +180,42 @@ def main():
                 print("[ERROR] Модель вернула невалидный JSON")
                 print(raw)
                 break
+
+            print("\n" + "─" * 55)
+            print(f"  ЗАДАЧА: {task}")
+            print(f"  ШАГ {step + 1}")
+            print(f"  URL:    {page.url}")
+            print(f"  TITLE:  {page.title()}")
+            print(f"  ДЕЙСТВИЕ: {json.dumps(action, ensure_ascii=False, indent=2)}")
+            print("─" * 55)
+
+            if detect_captcha(page, elements):
+                print("\n[!] ОБНАРУЖЕНА КАПЧА / ПРОВЕРКА БЕЗОПАСНОСТИ")
+                print("    Подтверди капчу вручную в окне браузера,")
+                print("    затем нажми Enter чтобы продолжить...")
+                input("    >> ")
+                print("[CONTINUE]")
+                page.screenshot(path=SCREENSHOT_PATH, type="jpeg", quality=85, full_page=False)
+                print(f"\n>>> ПОВТОРНЫЙ ПРОМПТ ПОСЛЕ КАПЧИ | Задача: \"{task}\"")
+                raw = ask_model(
+                    task=task,
+                    screenshot_path=SCREENSHOT_PATH,
+                    elements=elements,
+                    current_url=page.url,
+                    current_title=page.title(),
+                    focused_id=focused_id,
+                    history=history
+                )
+                print("[RAW]", raw)
+                try:
+                    action = json.loads(raw)
+                except Exception:
+                    print("[ERROR] Модель вернула невалидный JSON после капчи")
+                    print(raw)
+                    break
+                print("\n" + "─" * 55)
+                print(f"  НОВОЕ ДЕЙСТВИЕ: {json.dumps(action, ensure_ascii=False, indent=2)}")
+                print("─" * 55)
 
             if same_action(action, last_action):
                 repeat_count += 1

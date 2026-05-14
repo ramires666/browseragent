@@ -259,36 +259,38 @@ def has_recaptcha_on_page(page):
 
 
 def is_recaptcha_challenge(page):
-    """Проверяет challenge (bframe). Если есть только чекбокс — кликает его сначала."""
-    anchor = _find_anchor_frame(page)
+    """Проверяет, виден ли reCAPTCHA challenge (bframe). БЕЗ ПОБОЧНЫХ ЭФФЕКТОВ."""
     bframe = _find_bframe(page)
+    if not bframe:
+        return False
+    try:
+        box = bframe.frame_element().bounding_box()
+        if box and box["width"] >= 100 and box["height"] >= 100:
+            return True
+    except Exception:
+        pass
+    return False
 
-    if bframe:
-        try:
-            box = bframe.frame_element().bounding_box()
-            if box and box["width"] >= 100 and box["height"] >= 100:
-                return True
-        except Exception:
-            pass
 
-    if anchor and not bframe:
-        print("[RECAPTCHA] Найден чекбокс 'Я не робот'. Кликаю...")
-        _click_checkbox(page)
-        print("[RECAPTCHA] Жду 2с появления challenge...")
-        time.sleep(2)
-
-        bframe = _find_bframe(page)
-        if bframe:
-            try:
-                box = bframe.frame_element().bounding_box()
-                if box and box["width"] >= 100 and box["height"] >= 100:
-                    print("[RECAPTCHA] Challenge появился после клика по чекбоксу")
-                    return True
-            except Exception:
-                pass
-        print("[RECAPTCHA] Challenge не появился после клика по чекбоксу")
+def ensure_recaptcha_challenge(page):
+    """Если есть чекбокс, но нет challenge — кликает чекбокс и ждёт появления bframe."""
+    if is_recaptcha_challenge(page):
+        return True
+    anchor = _find_anchor_frame(page)
+    if not anchor:
         return False
 
+    print("[RECAPTCHA] Найден чекбокс 'Я не робот'. Кликаю...")
+    _click_checkbox(page)
+
+    for wait_s in [2, 2, 3]:
+        print(f"[RECAPTCHA] Жду {wait_s}с появления challenge...")
+        time.sleep(wait_s)
+        if is_recaptcha_challenge(page):
+            print("[RECAPTCHA] Challenge появился!")
+            return True
+
+    print("[RECAPTCHA] Challenge не появился после клика по чекбоксу")
     return False
 
 

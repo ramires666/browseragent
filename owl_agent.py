@@ -20,6 +20,7 @@ from owl_clicker import (
 )
 from owl_recaptcha import (
     is_recaptcha_challenge,
+    ensure_recaptcha_challenge,
     has_recaptcha_on_page,
     solve as solve_recaptcha
 )
@@ -65,16 +66,16 @@ def handle_google_block(page):
         if vx is not None:
             print(f"[GOOGLE BLOCK] Чекбокс найден, клик через pyautogui (viewport {vx:.0f}, {vy:.0f})")
             click_human_like(page, int(vx), int(vy))
-            print("[GOOGLE BLOCK] Кликнул. Жду 3с появления challenge...")
-            time.sleep(3)
 
-            if is_recaptcha_challenge(page):
-                print("[GOOGLE BLOCK] Challenge появился!")
-                return True
-            else:
-                print(f"[GOOGLE BLOCK] Challenge не появился. Попытка {attempt + 1}/3")
-                time.sleep(1)
-                continue
+            for wait_s in [2, 2, 3]:
+                print(f"[GOOGLE BLOCK] Жду {wait_s}с появления challenge...")
+                time.sleep(wait_s)
+                if is_recaptcha_challenge(page):
+                    print("[GOOGLE BLOCK] Challenge появился!")
+                    return True
+
+            print(f"[GOOGLE BLOCK] Challenge не появился. Попытка {attempt + 1}/3")
+            continue
 
         print(f"[GOOGLE BLOCK] iframe не найден, попытка {attempt + 1}/3, жду 1с...")
         time.sleep(1)
@@ -284,7 +285,7 @@ def main():
                 else:
                     continue
 
-            if is_recaptcha_challenge(page):
+            if ensure_recaptcha_challenge(page):
                 print("\n[!] ОБНАРУЖЕНА reCAPTCHA — пробую разгадать автоматически...")
                 solved = solve_recaptcha(page)
                 if solved:
@@ -334,7 +335,7 @@ def main():
             print("─" * 55)
 
             if detect_captcha(page, elements):
-                if is_recaptcha_challenge(page):
+                if ensure_recaptcha_challenge(page):
                     print("\n[!] ОБНАРУЖЕНА reCAPTCHA — пробую разгадать автоматически...")
                     solved = solve_recaptcha(page)
                     if solved:
@@ -344,7 +345,7 @@ def main():
                     else:
                         print("[CAPTCHA] Авторазгадывание не помогло — прошу помощи.")
 
-                if has_recaptcha_on_page(page):
+                if has_recaptcha_on_page(page) or is_recaptcha_challenge(page):
                     print("\n[!] reCAPTCHA на странице, авторешение не сработало")
                     print("    Разгадай вручную, затем нажми Enter...")
                     input("    >> ")

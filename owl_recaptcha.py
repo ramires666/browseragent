@@ -500,10 +500,23 @@ def solve(page, max_rounds=5):
         clicks_data = []
 
         if raw_clicks:
-            for pt in raw_clicks:
-                vx = int(bframe_box["x"] + pt["x"])
-                vy = int(bframe_box["y"] + pt["y"])
-                print(f"[RECAPTCHA] screenshot_click({pt['x']},{pt['y']}) -> viewport({vx},{vy})")
+            for i, pt in enumerate(raw_clicks):
+                if not isinstance(pt, dict):
+                    print(f"[RECAPTCHA] клик {i} не словарь: {pt}, пропускаю")
+                    continue
+                x_val = pt.get("x", 0)
+                y_val = pt.get("y", 0)
+                if isinstance(x_val, (list, tuple)):
+                    x_val = sum(x_val) / len(x_val) if x_val else 0
+                if isinstance(y_val, (list, tuple)):
+                    y_val = sum(y_val) / len(y_val) if y_val else 0
+                try:
+                    vx = int(bframe_box["x"] + float(x_val))
+                    vy = int(bframe_box["y"] + float(y_val))
+                except (TypeError, ValueError):
+                    print(f"[RECAPTCHA] клик {i} с некорректными координатами: {pt}, пропускаю")
+                    continue
+                print(f"[RECAPTCHA] screenshot_click({x_val},{y_val}) -> viewport({vx},{vy})")
                 clicks_data.append({"x": vx, "y": vy})
         elif tiles:
             cols = result.get("grid_cols", 3)

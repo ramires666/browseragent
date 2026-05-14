@@ -161,6 +161,7 @@ def _get_tiles(page):
         iframe_box = bframe.frame_element().bounding_box()
         if not iframe_box:
             return None
+        print(f"[RECAPTCHA] iframe_box: x={iframe_box['x']:.0f} y={iframe_box['y']:.0f} w={iframe_box['width']:.0f} h={iframe_box['height']:.0f}")
         tiles_rel = bframe.evaluate("""() => {
             const cells = document.querySelectorAll('.rc-imageselect-tile, td[class*="tile"], td.rc-imageselect-tile, table.rc-imageselect-table td');
             if (!cells.length) return [];
@@ -171,12 +172,16 @@ def _get_tiles(page):
         }""")
         if not tiles_rel:
             return None
+        print(f"[RECAPTCHA] найдено {len(tiles_rel)} плиток в iframe")
         tiles = []
         for t in tiles_rel:
+            tile_x = int(iframe_box["x"] + t["x"])
+            tile_y = int(iframe_box["y"] + t["y"])
+            print(f"[RECAPTCHA] tile[{t['index']}]: iframe_center({t['x']},{t['y']}) -> viewport({tile_x},{tile_y})")
             tiles.append({
                 "index": t["index"],
-                "x": int(iframe_box["x"] + t["x"]),
-                "y": int(iframe_box["y"] + t["y"]),
+                "x": tile_x,
+                "y": tile_y,
             })
         return tiles
     except Exception as e:

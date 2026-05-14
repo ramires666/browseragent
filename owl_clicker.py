@@ -1,13 +1,24 @@
 import time
 import random
 import pyautogui
-import pyperclip
 import pygetwindow as gw
+import ctypes
 
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.1
 
 SCREENSHOT_PATH = r"W:\_python\OWL\browser_screen.jpg"
+
+_has_cyrillic = lambda t: any(0x0400 < ord(c) < 0x0500 for c in t)
+
+_user32 = ctypes.windll.user32
+
+
+def _set_keyboard_layout(layout_hex):
+    """Переключает раскладку клавиатуры через Windows API."""
+    handle = _user32.LoadKeyboardLayoutW(layout_hex, 0x0001)  # KLF_ACTIVATE
+    _user32.ActivateKeyboardLayout(handle, 0x0000)
+    time.sleep(0.05)
 
 
 def _get_window_position(page):
@@ -67,6 +78,8 @@ def click_fallback(page, vx, vy):
     """Клик pyautogui по координатам viewport (vx, vy)."""
     sx, sy = viewport_to_screen(page, vx, vy)
     _focus_browser_window(page)
+    page.bring_to_front()
+    time.sleep(0.2)
     pyautogui.moveTo(sx, sy, duration=0.2)
     time.sleep(0.1)
     pyautogui.click()
@@ -79,7 +92,8 @@ def click_human_like(page, vx, vy):
     jy = random.randint(-3, 3)
     sx, sy = viewport_to_screen(page, vx + jx, vy + jy)
     _focus_browser_window(page)
-
+    page.bring_to_front()
+    time.sleep(0.2)
     dest_x = sx + random.randint(-2, 2)
     dest_y = sy + random.randint(-2, 2)
 
@@ -98,6 +112,8 @@ def double_click_fallback(page, vx, vy):
     """Двойной клик pyautogui по координатам viewport (vx, vy)."""
     sx, sy = viewport_to_screen(page, vx, vy)
     _focus_browser_window(page)
+    page.bring_to_front()
+    time.sleep(0.2)
     pyautogui.moveTo(sx, sy, duration=0.2)
     time.sleep(0.1)
     pyautogui.doubleClick()
@@ -105,23 +121,26 @@ def double_click_fallback(page, vx, vy):
 
 
 def type_fallback(page, text):
-    """Вставляет текст через Ctrl+V (буфер обмена). Надёжнее чем pyautogui.write() для Unicode/кириллицы."""
+    """Побуквенный ввод через pyautogui.write() с переключением раскладки под кириллицу."""
     _focus_browser_window(page)
-    time.sleep(0.3)
-    try:
-        pyperclip.copy(text)
-        time.sleep(0.1)
-        clip_check = pyperclip.paste()
-        print(f"[TYPE] clipboard: '{clip_check[:30]}'")
-        pyautogui.hotkey("ctrl", "v")
-        time.sleep(0.3)
-    except Exception as e:
-        print(f"[TYPE] pyperclip failed ({e}), fallback to pyautogui.write()")
-        pyautogui.write(text, interval=0.08)
+    time.sleep(0.2)
+    page.bring_to_front()
+    time.sleep(0.2)
+
+    has_cyrillic = _has_cyrillic(text)
+    if has_cyrillic:
+        print(f"[TYPE] переключаю раскладку на русскую")
+        _set_keyboard_layout("00000419")
+
+    pyautogui.write(text, interval=0.05)
+
+    if has_cyrillic:
+        _set_keyboard_layout("00000409")
+    print(f"[TYPE] напечатано: '{text[:30]}'")
 
 
 def type_js_fallback(page, el_id, text):
-    """Вставляет текст через JS (value + events). Запасной вариант когда pyautogui+clipboard не работает."""
+    """Вставляет текст через JS (value + events). Запасной вариант когда pyautogui не сработал."""
     print(f"[TYPE JS] устанавливаю value элемента {el_id} через DOM")
     escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
     result = page.evaluate(f"""() => {{
@@ -140,7 +159,8 @@ def type_js_fallback(page, el_id, text):
 def press_fallback(page, key):
     """Нажимает клавишу через pyautogui."""
     _focus_browser_window(page)
-    time.sleep(0.1)
+    page.bring_to_front()
+    time.sleep(0.2)
     pyautogui.press(key)
     time.sleep(0.2)
 

@@ -1,9 +1,14 @@
 import json
+import os
 import base64
 import requests
+from dotenv import load_dotenv
 
-API_URL = "http://127.0.0.1:8080/v1/chat/completions"
-SCREENSHOT_PATH = r"W:\_python\OWL\browser_screen.jpg"
+load_dotenv()
+
+API_KEY = os.getenv("LLM_API_KEY", "")
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8080/v1/chat/completions")
+SCREENSHOT_PATH = os.getenv("SCREENSHOT_PATH", r"W:\_python\OWL\browser_screen.jpg")
 
 SYSTEM_PROMPT = """
 You are a browser automation agent.
@@ -90,7 +95,11 @@ Visible interactive elements:
         "stream": False
     }
 
-    r = requests.post(API_URL, json=payload, timeout=180)
+    headers = {}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
+
+    r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
     print("[MODEL STATUS]", r.status_code)
     print("[MODEL BODY]", r.text)
     r.raise_for_status()

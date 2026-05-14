@@ -349,46 +349,40 @@ def do_action(page, action, elements):
 
     if kind == "click":
         el_id = action["id"]
-        coords = find_element_coords(elements, el_id)
-        if coords:
-            print(f"[PYAUTOGUI] click {el_id} at viewport ({coords[0]}, {coords[1]})")
-            click_human_like(page, coords[0], coords[1])
-            ok, reason = verify_action_via_screenshot(page, action)
-            if not ok:
-                print(f"[VERIFY] Click не сработал: {reason}. Пробую vision fallback...")
-                vision_fallback(page, action, elements, action_label=f"click {el_id}")
-        else:
-            print(f"[PYAUTOGUI] Element {el_id} not in DOM — vision fallback...")
-            ok = vision_fallback(page, action, elements, action_label=f"click {el_id}")
-            if not ok:
-                print(f"[PYAUTOGUI] Vision не помогла — ошибка")
+        print(f"[PYAUTOGUI] click {el_id} — через vision fallback (скриншот->LLM->координаты)...")
+        ok = vision_fallback(page, action, elements, action_label=f"click {el_id}")
+        if not ok:
+            coords = find_element_coords(elements, el_id)
+            if coords:
+                print(f"[PYAUTOGUI] Vision не помогла, пробую DOM координаты ({coords[0]}, {coords[1]})")
+                click_human_like(page, coords[0], coords[1])
+            else:
+                print(f"[PYAUTOGUI] Ничего не помогло — ошибка")
                 raise
         return False
 
     if kind == "type":
         el_id = action["id"]
         text = action["text"]
-        coords = find_element_coords(elements, el_id)
-        if coords:
-            print(f"[PYAUTOGUI] type into {el_id} at viewport ({coords[0]}, {coords[1]})")
-            click_human_like(page, coords[0], coords[1])
+        print(f"[PYAUTOGUI] type '{text[:30]}' в {el_id} — через vision fallback...")
+        ok = vision_fallback(page, action, elements, action_label=f"type into {el_id}")
+        if ok:
             time.sleep(0.5)
             type_fallback(page, text)
-            ok, reason = verify_action_via_screenshot(page, action)
-            if not ok:
-                print(f"[VERIFY] Type не сработал: {reason}. Пробую vision fallback...")
-                ok2 = vision_fallback(page, action, elements, action_label=f"type into {el_id}")
-                if ok2:
-                    time.sleep(0.5)
-                    type_fallback(page, text)
+            ok2, reason = verify_action_via_screenshot(page, action)
+            if not ok2:
+                print(f"[VERIFY] Текст не ввёлся: {reason}. Пробую ещё раз...")
+                time.sleep(0.5)
+                type_fallback(page, text)
         else:
-            print(f"[PYAUTOGUI] Element {el_id} not in DOM — vision fallback...")
-            ok = vision_fallback(page, action, elements, action_label=f"type into {el_id}")
-            if ok:
+            coords = find_element_coords(elements, el_id)
+            if coords:
+                print(f"[PYAUTOGUI] Vision не помогла, тыкаю в DOM координаты ({coords[0]}, {coords[1]})")
+                click_human_like(page, coords[0], coords[1])
                 time.sleep(0.5)
                 type_fallback(page, text)
             else:
-                print(f"[PYAUTOGUI] Vision не помогла — ошибка")
+                print(f"[PYAUTOGUI] Ничего не помогло — ошибка")
                 raise
         return False
 

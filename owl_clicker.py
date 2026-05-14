@@ -1,6 +1,7 @@
 import time
 import random
 import pyautogui
+import pyperclip
 import pygetwindow as gw
 
 pyautogui.FAILSAFE = True
@@ -100,9 +101,16 @@ def double_click_fallback(page, vx, vy):
 
 
 def type_fallback(page, text):
-    """Печатает текст через pyautogui в текущем активном элементе."""
+    """Вставляет текст через Ctrl+V (буфер обмена). Надёжнее чем pyautogui.write() для Unicode/кириллицы."""
     time.sleep(0.3)
-    pyautogui.write(text, interval=0.08)
+    try:
+        pyperclip.copy(text)
+        time.sleep(0.1)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(0.2)
+    except Exception as e:
+        print(f"[TYPE] pyperclip failed ({e}), fallback to pyautogui.write()")
+        pyautogui.write(text, interval=0.08)
 
 
 def press_fallback(page, key):

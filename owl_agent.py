@@ -3,8 +3,32 @@ import json
 import time
 import traceback
 
-COOKIE_PATH = os.getenv("COOKIE_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.json"))
+from owl_browser import (
+    create_browser,
+    close_browser,
+    annotate_and_extract_elements,
+    get_focused_id,
+    resolve_locator
+)
+from owl_llm import ask_model, SCREENSHOT_PATH
+from owl_clicker import (
+    click_fallback,
+    click_human_like,
+    double_click_fallback,
+    type_fallback,
+    press_fallback,
+    find_element_coords
+)
+from owl_recaptcha import (
+    is_recaptcha_challenge,
+    ensure_recaptcha_challenge,
+    has_recaptcha_on_page,
+    detect_recaptcha_via_vision,
+    solve as solve_recaptcha
+)
 
+
+COOKIE_PATH = os.getenv("COOKIE_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.json"))
 SAVED_COOKIES = False
 
 
@@ -31,31 +55,6 @@ def load_cookies(page):
         print(f"[COOKIES] Загружено {len(cookies)} кук из {COOKIE_PATH}")
     except Exception as e:
         print(f"[COOKIES] Ошибка загрузки: {e}")
-
-
-from owl_browser import (
-    create_browser,
-    close_browser,
-    annotate_and_extract_elements,
-    get_focused_id,
-    resolve_locator
-)
-from owl_llm import ask_model, SCREENSHOT_PATH
-from owl_clicker import (
-    click_fallback,
-    click_human_like,
-    double_click_fallback,
-    type_fallback,
-    press_fallback,
-    find_element_coords
-)
-from owl_recaptcha import (
-    is_recaptcha_challenge,
-    ensure_recaptcha_challenge,
-    has_recaptcha_on_page,
-    detect_recaptcha_via_vision,
-    solve as solve_recaptcha
-)
 
 
 CAPTCHA_KEYWORDS = [

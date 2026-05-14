@@ -6,48 +6,26 @@ import re
 from owl_llm import API_URL, API_KEY, _ask_model_to_fix_json
 
 RECAPTCHA_SYSTEM_PROMPT = """
-You are solving a reCAPTCHA image challenge. Look at the screenshot: it shows a grid of square images and a challenge instruction at the top.
+You see a reCAPTCHA challenge screenshot. The user needs to click on matching tiles.
 
-IMPORTANT: Output ONLY raw JSON. Do NOT include thinking, reasoning, explanations, or any text before or after the JSON.
+IMPORTANT: Output ONLY raw JSON. Do NOT include thinking, reasoning, or any text before or after.
 
 Your job:
-1. Read the challenge instruction (e.g. "select all squares with traffic lights" or "select all images with a fire hydrant")
-2. Look at EVERY image in the grid carefully
-3. Determine the EXACT pixel boundaries of the grid and each tile within it
+1. Read the instruction (e.g. "select all squares with traffic lights")
+2. Look at EVERY image in the grid
+3. Return the (x,y) pixel coordinates of the CENTER of EVERY matching tile
 
-The screenshot includes the FULL challenge area. Tiles are indexed row-by-row, left-to-right, top-to-bottom. Grid can be 3x3, 4x4, 3x4, or 4x3.
+Coordinates are in the screenshot's pixel space, (0,0) = top-left of this screenshot.
 
-Return EXACTLY this JSON format with PRECISE screenshot pixel coordinates:
-{
-  "tiles": [0, 3, 6],
-  "grid": {
-    "x": 10,
-    "y": 60,
-    "cell_w": 120,
-    "cell_h": 120,
-    "cols": 3,
-    "rows": 3
-  },
-  "reason": "top-left, middle-left, bottom-left contain the target"
-}
+Return exactly this format:
+{"clicks":[{"x":100,"y":200},{"x":300,"y":200},{"x":100,"y":350}],"reason":"3 tiles contain the target"}
 
-- "grid.x" = left edge of the first tile in screenshot pixels
-- "grid.y" = top edge of the first tile in screenshot pixels (AFTER the instruction text)
-- "grid.cell_w" = width of one tile in pixels
-- "grid.cell_h" = height of one tile in pixels
-- "grid.cols" / "grid.rows" = grid dimensions
+For split-object challenges: if a target object is split across adjacent tiles,
+select ALL tiles that contain ANY fragment of the object.
+If no matches: {"clicks":[],"skip":true,"reason":"none match"}
+If green checkmark visible: {"done":true}
 
-CRITICAL RULES FOR SPLIT-OBJECT CHALLENGES:
-- The target object may be SPLIT across multiple adjacent tiles (like a puzzle).
-- Select EVERY tile that contains ANY PART of the target object — even a small corner, edge, or fragment.
-- Look at the BORDERS of each tile carefully: if part of the object is cut off at the edge of a tile,
-  the adjacent tile probably also contains a fragment.
-- Example: one bus might be spread across 4 tiles — ALL 4 must be selected.
-- Missing a tile that contains a small piece of the object = FAIL.
-- If no tiles match: {"tiles":[],"skip":true,"reason":"none match"}
-- If green checkmark visible (already solved): {"done":true}
-- If tiles are unclear/blurry: {"skip":true}
-- Return ONLY valid JSON.
+Return ONLY valid JSON, nothing else.
 """
 
 FIND_CHALLENGE_PROMPT = """
@@ -264,13 +242,7 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
             {
                 "role": "user",
                 "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"Challenge: \"{challenge_text}\"\n\n"
-                            "Return tile indices AND grid pixel boundaries in this screenshot."
-                        )
-                    },
+                    {"type": "text", "text": "Return pixel coordinates (x,y) of ALL matching tiles in this screenshot."},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
                 ]
             }

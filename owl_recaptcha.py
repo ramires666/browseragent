@@ -475,10 +475,21 @@ def solve(page, max_rounds=5):
             _random_delay(0.5, 1)
             continue
 
-        raw_tiles = _extract_tile_indices(result)
-        if raw_tiles is None:
-            raw_tiles = result.get("clicks") or []
-        if not raw_tiles:
+        raw_clicks = result.get("clicks") or []
+        if raw_clicks and isinstance(raw_clicks[0], dict) and "x" in raw_clicks[0] and "y" in raw_clicks[0]:
+            clicks_data = []
+            for pt in raw_clicks:
+                vx = int(bframe_box["x"] + pt["x"])
+                vy = int(bframe_box["y"] + pt["y"])
+                print(f"[RECAPTCHA] screenshot_click({pt['x']},{pt['y']}) -> viewport({vx},{vy})")
+                clicks_data.append({"x": vx, "y": vy})
+        else:
+            raw_tiles = _extract_tile_indices(result)
+            if raw_tiles is None:
+                raw_tiles = []
+            clicks_data = _tiles_to_clicks(raw_tiles, result, bframe_box, page)
+
+        if not clicks_data:
             print("[RECAPTCHA] Нет совпавших плиток/кликов")
             skip_btn = _get_skip_button(page)
             if skip_btn:

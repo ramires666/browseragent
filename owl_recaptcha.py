@@ -500,12 +500,10 @@ def solve(page, max_rounds=5):
 
         if not result:
             print("[RECAPTCHA] LLM не вернула результат")
-            _wait_step("ОШИБКА LLM")
-            _random_delay(0.5, 1)
+            time.sleep(1)
             continue
 
         print(f"[RECAPTCHA] ОТВЕТ LLM: {json.dumps(result, ensure_ascii=False, indent=2)}")
-        _wait_step("ОТВЕТ LLM")
         if isinstance(result, dict):
             result["_scale"] = scale
 
@@ -516,7 +514,7 @@ def solve(page, max_rounds=5):
             print("[RECAPTCHA] LLM: пропустить")
             skip_btn = _get_skip_button(page)
             if skip_btn:
-                _wait_step("КЛИК SKIP", f"({skip_btn[0]}, {skip_btn[1]})")
+                print(f"[RECAPTCHA] Skip в ({skip_btn[0]}, {skip_btn[1]})")
                 click_human_like(page, skip_btn[0], skip_btn[1])
             _random_delay(0.5, 1)
             continue
@@ -575,25 +573,25 @@ def solve(page, max_rounds=5):
             clicks_data.append({"x": vx, "y": vy})
 
         print(f"[RECAPTCHA] Совпало плиток: {len(clicks_data)}")
-        _wait_step("КЛИКИ ПО ПЛИТКАМ", f"{len(clicks_data)} кликов")
         for i, pt in enumerate(clicks_data):
             cx, cy = pt["x"], pt["y"]
+            if i == 0:
+                time.sleep(0.5)
             print(f"[RECAPTCHA] Клик {i+1}/{len(clicks_data)} -> ({cx}, {cy})")
             click_human_like(page, cx, cy)
-            if _debug():
-                _wait_step(f"КЛИК {i+1}")
+            if i == 0:
+                _wait_step("ПОСЛЕ КЛИКА 1")
             else:
                 _random_delay(0.25, 0.7)
 
         verify_btn = _get_verify_button(page)
         if verify_btn:
             print(f"[RECAPTCHA] Verify в ({verify_btn[0]}, {verify_btn[1]})")
-            _wait_step("КЛИК ПРОВЕРИТЬ")
             _random_delay(0.4, 0.8)
             click_human_like(page, verify_btn[0], verify_btn[1])
         else:
             print("[RECAPTCHA] Verify не найдена")
-            _wait_step("VERIFY НЕ НАЙДЕНА")
+            _random_delay(0.3, 0.6)
 
         time.sleep(3)
         if _is_solved(page):
@@ -603,18 +601,16 @@ def solve(page, max_rounds=5):
         verify_btn = _get_verify_button(page)
         if verify_btn:
             print(f"[RECAPTCHA] Verify в ({verify_btn[0]}, {verify_btn[1]})")
-            _wait_step("КЛИК ПРОВЕРИТЬ")
             _random_delay(0.4, 0.8)
             click_human_like(page, verify_btn[0], verify_btn[1])
         else:
             print("[RECAPTCHA] Verify не найдена")
-            _wait_step("VERIFY НЕ НАЙДЕНА")
+            _random_delay(0.3, 0.6)
 
         time.sleep(3)
 
         if _is_solved(page):
             print("[RECAPTCHA] РЕШЕНО!")
-            _wait_step("РЕШЕНО")
             return True
 
         incorrect = False
@@ -632,16 +628,15 @@ def solve(page, max_rounds=5):
 
         if incorrect:
             print("[RECAPTCHA] Неправильно")
-            _wait_step("НЕВЕРНО")
             _random_delay(0.8, 1.5)
             continue
         if bframe_alive:
             print("[RECAPTCHA] Новые картинки! Анализирую заново...")
-            _wait_step("ОБНОВЛЕНИЕ КАРТИНОК")
             time.sleep(1)
             continue
 
-        _wait_step("BFREAME ПРОПАЛ")
+        print("[RECAPTCHA] bframe пропал, выход")
+        return False
 
     print("[RECAPTCHA] Лимит попыток")
     return False

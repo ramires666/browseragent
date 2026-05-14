@@ -126,10 +126,22 @@ def do_action(page, action, elements):
 
 def main():
     print("[START]")
-    task = input("Введите задачу: ").strip()
-    if not task:
-        print("Пустая задача.")
-        return
+    TASK_FILE = "task.txt"
+    task_from_file = None
+    try:
+        with open(TASK_FILE, "r", encoding="utf-8") as f:
+            task_from_file = f.read().strip()
+    except Exception:
+        pass
+
+    if task_from_file:
+        task = task_from_file
+        print(f"[TASK FROM FILE] {task}")
+    else:
+        task = input("Введите задачу: ").strip()
+        if not task:
+            print("Пустая задача.")
+            return
 
     print("\n" + "█" * 55)
     print("  SYSTEM PROMPT (инструкция модели):")

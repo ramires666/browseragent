@@ -189,6 +189,49 @@ def _get_tiles(page):
         return None
 
 
+def _extract_tile_indices(result):
+    """Ищет в ответе LLM любые индексы плиток (tiles, tile_indices, bicycle_indices, ...)."""
+    if not result:
+        return None
+    for key, val in result.items():
+        if isinstance(val, list) and len(val) > 0:
+            if all(isinstance(v, int) and 0 <= v <= 48 for v in val):
+                print(f"[RECAPTCHA] найдены индексы в поле '{key}': {val}")
+                return val
+    return None
+
+
+def _extract_grid(result):
+    """Ищет в ответе LLM информацию о сетке в любом формате."""
+    if not result:
+        return None
+    for key, val in result.items():
+        if not isinstance(val, dict):
+            continue
+        key_lower = key.lower()
+        d = val
+        if not ("grid" in key_lower or "coordinate" in key_lower or "boundar" in key_lower or "cell" in key_lower):
+            continue
+        x = d.get("x") or d.get("start_x")
+        y = d.get("y") or d.get("start_y")
+        cw = d.get("cell_w") or d.get("cell_width") or d.get("width")
+        ch = d.get("cell_h") or d.get("cell_height") or d.get("height")
+        if x is not None and y is not None and cw and ch:
+            cols = d.get("cols")
+            rows = d.get("rows")
+            if not cols and cw:
+                grid_w = d.get("width") or d.get("grid_width")
+                if grid_w:
+                    cols = max(1, round(grid_w / cw))
+            if not cols:
+                cols = 3
+            if not rows:
+                rows = 3
+            print(f"[RECAPTCHA] grid из '{key}': x={x} y={y} cell={cw}x{ch} {cols}x{rows}")
+            return {"x": int(x), "y": int(y), "cell_w": int(cw), "cell_h": int(ch), "cols": int(cols), "rows": int(rows)}
+    return None
+
+
 def _tiles_to_clicks(raw_tiles, result, bframe_box, page):
     """Преобразует tile индексы в viewport координаты.
     Приоритет: grid из LLM (точные границы из скриншота) -> DOM _get_tiles -> fallback."""
@@ -199,38 +242,14 @@ def _tiles_to_clicks(raw_tiles, result, bframe_box, page):
     if old_format:
         return _dedup_coords(raw_tiles, threshold=20)
 
-    grid = result.get("grid") if result else None
+    grid = _extract_grid(result)
     if grid:
-        print(f"[RECAPTCHA] grid из LLM: x={grid['x']} y={grid['y']} cell_w={grid['cell_w']} cell_h={grid['cell_h']} cols={grid['cols']} rows={grid['rows']}")
-        sx_w = bframe_box["width"]
-        sx_h = bframe_box["height"]
         clicks = []
         for idx in raw_tiles:
             col = idx % grid["cols"]
             row = idx // grid["cols"]
             scr_x = grid["x"] + col * grid["cell_w"] + grid["cell_w"] // 2
             scr_y = grid["y"] + row * grid["cell_h"] + grid["cell_h"] // 2
-            vp_x = int(bframe_box["x"] + scr_x)
-            vp_y = int(bframe_box["y"] + scr_y)
-            print(f"[RECAPTCHA] tile {idx} (row={row} col={col}): screenshot_center({scr_x},{scr_y}) -> viewport({vp_x},{vp_y})")
-            clicks.append({"x": vp_x, "y": vp_y, "index": idx})
-        return clicks
-
-    gpb = result.get("grid_pixel_boundaries") if result else None
-    cs = result.get("cell_size") if result else None
-    if gpb and cs and cs.get("width") and cs.get("height"):
-        print(f"[RECAPTCHA] grid_pixel_boundaries: {gpb} cell_size: {cs}")
-        sx_w = bframe_box["width"]
-        sx_h = bframe_box["height"]
-        cols = max(1, round(gpb["width"] / cs["width"]))
-        rows = max(1, round(gpb["height"] / cs["height"]))
-        print(f"[RECAPTCHA] вычислено: cols={cols} rows={rows}")
-        clicks = []
-        for idx in raw_tiles:
-            col = idx % cols
-            row = idx // cols
-            scr_x = gpb["x"] + col * cs["width"] + cs["width"] // 2
-            scr_y = gpb["y"] + row * cs["height"] + cs["height"] // 2
             vp_x = int(bframe_box["x"] + scr_x)
             vp_y = int(bframe_box["y"] + scr_y)
             print(f"[RECAPTCHA] tile {idx} (row={row} col={col}): screenshot_center({scr_x},{scr_y}) -> viewport({vp_x},{vp_y})")
@@ -424,7 +443,9 @@ def solve(page, max_rounds=5):
             _random_delay(0.5, 1)
             continue
 
-        raw_tiles = (result.get("tiles") or result.get("tile_indices") or result.get("clicks") or [])
+        raw_tiles = _extract_tile_indices(result)
+        if raw_tiles is None:
+            raw_tiles = result.get("clicks") or []
         if not raw_tiles:
             print("[RECAPTCHA] Нет совпавших плиток/кликов")
             skip_btn = _get_skip_button(page)

@@ -7,3 +7,4 @@ venv/
 .venv/
 browser_screen.jpg
 _recaptcha_challenge.jpg
+cookies.json

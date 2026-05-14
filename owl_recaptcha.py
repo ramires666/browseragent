@@ -1,13 +1,10 @@
 import json
 import os
-import sys
 import time
 import random
-import base64
-import requests
 from dotenv import load_dotenv
-from owl_llm import API_URL, API_KEY
 from owl_clicker import click_human_like
+from owl_recaptcha_llm import ask_llm_for_clicks, detect_recaptcha_via_vision
 
 _ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 load_dotenv(dotenv_path=_ENV_PATH, override=True)
@@ -17,8 +14,7 @@ RECAPTCHA_SCREENSHOT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file_
 
 
 def _debug():
-    val = os.getenv("RECAPTCHA_DEBUG", "")
-    return val.lower() in ("1", "true", "yes")
+    return os.getenv("RECAPTCHA_DEBUG", "").lower() in ("1", "true", "yes")
 
 
 def _debug_report():
@@ -42,33 +38,6 @@ def _wait_step(label, detail=None):
     print(f"{'=' * 55}")
     input("  >>> Нажми Enter для продолжения... ")
     print()
-
-RECAPTCHA_SYSTEM_PROMPT = """
-You are solving a reCAPTCHA image challenge. Look at the screenshot: it shows a grid of square images and a challenge instruction at the top.
-
-Your job:
-1. Read the challenge instruction (e.g. "select all squares with traffic lights" or "select all images with a fire hydrant")
-2. Look at EVERY image in the grid carefully
-3. Return the (x, y) pixel center of EVERY tile that matches
-
-The screenshot size (width x height) is provided below. Coordinates are in screenshot pixels, (0,0) = top-left.
-
-Return exactly this JSON format:
-{"clicks":[{"x":100,"y":80},{"x":280,"y":80},{"x":100,"y":200}],"reason":"these 3 contain fire hydrant"}
-
-CRITICAL RULES FOR SPLIT-OBJECT CHALLENGES:
-- The target object may be SPLIT across multiple adjacent tiles (like a puzzle).
-- Select EVERY tile that contains ANY PART of the target object — even a small corner, edge, or fragment.
-- Look at the BORDERS of each tile carefully: if part of the object is cut off at the edge of a tile,
-  the adjacent tile probably also contains a fragment.
-- Example: one bus might be spread across 4 tiles — ALL 4 must be selected.
-- Missing a tile that contains a small piece of the object = FAIL.
-- Click COORDINATES must be DISTINCT for each tile (different x,y each time).
-- If no tiles match: {"clicks":[],"skip":true,"reason":"none match"}
-- If green checkmark visible (already solved): {"done":true}
-- If tiles are unclear/blurry: {"skip":true}
-- Return ONLY valid JSON.
-"""
 
 
 def _random_delay(min_s=0.15, max_s=0.5):
@@ -99,7 +68,6 @@ def _find_bframe(page):
 
 
 def _click_checkbox(page):
-    """Находит и кликает чекбокс 'Я не робот' (anchor iframe) через pyautogui."""
     anchor = _find_anchor_frame(page)
     if not anchor:
         return False
@@ -186,7 +154,6 @@ def _get_skip_button(page):
 
 
 def _get_tiles(page):
-    """Достаёт центры плиток reCAPTCHA из bframe DOM."""
     bframe = _find_bframe(page)
     if not bframe:
         return None
@@ -218,14 +185,12 @@ def _get_tiles(page):
 
 
 def _snap_to_grid(coords, bframe_box, page):
-    """Привязывает координаты к центрам ближайших плиток reCAPTCHA."""
     if not coords:
         return coords
     tiles = _get_tiles(page)
     if not tiles:
-        print("[RECAPTCHA] snap_to_grid: плитки не найдены, возвращаю raw координаты")
+        print("[RECAPTCHA] snap_to_grid: плитки не найдены, raw координаты")
         return _dedup_coords(coords, threshold=20)
-
     snapped = []
     for c in coords:
         cx, cy = c.get("x", 0), c.get("y", 0)
@@ -246,202 +211,17 @@ def _snap_to_grid(coords, bframe_box, page):
 
 
 def _dedup_coords(clicks, threshold=25):
-    """Убирает дубликаты координат (ближе threshold px друг к другу)."""
     unique = []
     for c in clicks:
         cx, cy = c.get("x", 0), c.get("y", 0)
         dup = False
         for u in unique:
-            ux, uy = u["x"], u["y"]
-            if abs(cx - ux) <= threshold and abs(cy - uy) <= threshold:
+            if abs(cx - u["x"]) <= threshold and abs(cy - u["y"]) <= threshold:
                 dup = True
                 break
         if not dup:
             unique.append(c)
     return unique
-
-
-def _repair_json(text):
-    stripped = text.strip()
-    if not stripped:
-        return stripped
-    try:
-        json.loads(stripped)
-        return stripped
-    except json.JSONDecodeError:
-        pass
-    if stripped.count("{") > stripped.count("}"):
-        stripped += "}"
-    if stripped.count("[") > stripped.count("]"):
-        stripped += "]"
-    try:
-        json.loads(stripped)
-        return stripped
-    except json.JSONDecodeError:
-        pass
-    idx = stripped.rfind(':"')
-    if idx > 0 and not stripped.endswith('"}'):
-        stripped += '"}'
-    try:
-        json.loads(stripped)
-        return stripped
-    except json.JSONDecodeError:
-        pass
-    return text
-
-
-def _ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
-    with open(screenshot_path, "rb") as f:
-        image_b64 = base64.b64encode(f.read()).decode("utf-8")
-
-    w = int(bframe_box["width"])
-    h = int(bframe_box["height"])
-
-    payload = {
-        "model": "gui-owl",
-        "messages": [
-            {"role": "system", "content": RECAPTCHA_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"Screenshot size: {w}x{h} pixels.\n"
-                            f"Challenge: \"{challenge_text}\"\n\n"
-                            "List the (x,y) center of EVERY matching tile. "
-                            "Each tile must have DIFFERENT coordinates."
-                        )
-                    },
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
-                ]
-            }
-        ],
-        "temperature": 0.1,
-        "max_tokens": 1200,
-        "stream": False,
-    }
-
-    headers = {}
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
-
-    r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
-    print(f"[RECAPTCHA LLM STATUS] {r.status_code}")
-    r.raise_for_status()
-    data = r.json()
-    msg = data["choices"][0]["message"]
-    raw = (msg.get("content") or "").strip()
-    if not raw:
-        raw = (msg.get("reasoning_content") or "").strip()
-    print(f"[RECAPTCHA LLM RAW] {raw[:500]}")
-
-    if not raw:
-        print(f"[RECAPTCHA] LLM вернула пустой ответ. Вся message: {json.dumps(msg, ensure_ascii=False)[:300]}")
-        print(f"[RECAPTCHA] Статус: {r.status_code}")
-        return None
-
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        repaired = _repair_json(raw)
-        if repaired != raw:
-            print(f"[RECAPTCHA JSON REPAIR] исправлено")
-            try:
-                return json.loads(repaired)
-            except json.JSONDecodeError:
-                pass
-        print(f"[RECAPTCHA] LLM вернула невалидный JSON: {raw[:300]}")
-        return None
-
-
-FIND_CHALLENGE_PROMPT = """
-You are looking at a screenshot of a webpage that may have a reCAPTCHA challenge visible.
-
-The reCAPTCHA challenge looks like a grid of images (3x3 or 4x4) with a text instruction at the top
-like "Select all squares with traffic lights" or similar. There is also a "Verify" or "Skip" button.
-
-Look carefully at the screenshot and determine:
-1. Is a reCAPTCHA image challenge currently visible? (a grid of thumbnails to click)
-2. If YES — return the viewport pixel coordinates of the CENTER of each image tile.
-3. If NO — return {"found": false}
-
-Return exactly this JSON format for YES:
-{"found":true,"clicks":[{"x":100,"y":200},{"x":300,"y":200},{"x":100,"y":350}],"reason":"these 3 have traffic lights"}
-
-Return for NO:
-{"found":false,"reason":"no challenge grid visible"}
-
-Coordinates are in viewport pixels, (0,0) = top-left of the visible browser window.
-"""
-
-
-def find_challenge_via_screenshot(page):
-    """Когда фреймовый поиск не находит challenge, пробуем найти его через скриншот + LLM vision."""
-    print("[RECAPTCHA VISION] Фреймы не помогли — пробую найти challenge через скриншот...")
-    from owl_llm import SCREENSHOT_PATH as FULL_SCREENSHOT_PATH
-    page.screenshot(path=FULL_SCREENSHOT_PATH, type="jpeg", quality=90, full_page=False)
-
-    with open(FULL_SCREENSHOT_PATH, "rb") as f:
-        image_b64 = base64.b64encode(f.read()).decode("utf-8")
-
-    viewport = page.viewport_size
-    w, h = viewport["width"], viewport["height"]
-
-    payload = {
-        "model": "gui-owl",
-        "messages": [
-            {"role": "system", "content": FIND_CHALLENGE_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": f"Viewport size: {w}x{h}. Is there a reCAPTCHA challenge here?"},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
-                ]
-            }
-        ],
-        "temperature": 0.1,
-        "max_tokens": 1200,
-        "stream": False,
-    }
-
-    headers = {}
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
-
-    r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
-    r.raise_for_status()
-    msg = r.json()["choices"][0]["message"]
-    raw = (msg.get("content") or "").strip()
-    if not raw:
-        raw = (msg.get("reasoning_content") or "").strip()
-    print(f"[RECAPTCHA VISION RAW] {raw[:500]}")
-
-    if not raw:
-        print("[RECAPTCHA VISION] LLM вернула пустой ответ")
-        return None
-
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        repaired = _repair_json(raw)
-        if repaired != raw:
-            try:
-                return json.loads(repaired)
-            except json.JSONDecodeError:
-                pass
-        print(f"[RECAPTCHA VISION] LLM вернула невалидный JSON")
-        return None
-
-
-def detect_recaptcha_via_vision(page):
-    """Проверяет наличие reCAPTCHA challenge через скриншот + LLM. Возвращает True/False."""
-    result = find_challenge_via_screenshot(page)
-    if result and result.get("found"):
-        print("[RECAPTCHA VISION] ✅ challenge найден через скриншот!")
-        return True
-    print("[RECAPTCHA VISION] ❌ challenge не найден через скриншот")
-    return False
 
 
 def _is_solved(page):
@@ -460,11 +240,6 @@ def _is_solved(page):
         return False
 
 
-def has_recaptcha_on_page(page):
-    """Проверяет, есть ли на странице reCAPTCHA (чекбокс или challenge)."""
-    return _find_anchor_frame(page) is not None or _find_bframe(page) is not None
-
-
 def _debug_frames(page):
     print("[RECAPTCHA DEBUG FRAMES] Все фреймы на странице:")
     for i, f in enumerate(page.frames):
@@ -478,8 +253,11 @@ def _debug_frames(page):
         print(f"  [{i}] {box_str} {url}")
 
 
+def has_recaptcha_on_page(page):
+    return _find_anchor_frame(page) is not None or _find_bframe(page) is not None
+
+
 def is_recaptcha_challenge(page):
-    """Проверяет, виден ли reCAPTCHA challenge (bframe). БЕЗ ПОБОЧНЫХ ЭФФЕКТОВ."""
     bframe = _find_bframe(page)
     if not bframe:
         _debug_frames(page)
@@ -490,131 +268,97 @@ def is_recaptcha_challenge(page):
             print(f"[RECAPTCHA] bframe box: {box['width']:.0f}x{box['height']:.0f} at ({box['x']:.0f},{box['y']:.0f})")
         if box and box["width"] >= 50 and box["height"] >= 50:
             return True
-        print(f"[RECAPTCHA] bframe найден, но мал: {box['width']:.0f}x{box['height']:.0f} < 50x50")
+        print(f"[RECAPTCHA] bframe мал: {box['width']:.0f}x{box['height']:.0f} < 50x50")
     except Exception as e:
         print(f"[RECAPTCHA] bframe box error: {e}")
-        pass
     return False
 
 
 def ensure_recaptcha_challenge(page):
-    """Если есть чекбокс, но нет challenge — кликает чекбокс и ждёт появления bframe."""
     if is_recaptcha_challenge(page):
         return True
     anchor = _find_anchor_frame(page)
     if not anchor:
         return False
-
-    print("[RECAPTCHA] Найден чекбокс 'Я не робот'. Кликаю...")
+    print("[RECAPTCHA] Чекбокс найден. Кликаю...")
     _click_checkbox(page)
-
     for wait_s in [2, 2, 3]:
-        print(f"[RECAPTCHA] Жду {wait_s}с появления challenge...")
+        print(f"[RECAPTCHA] Жду {wait_s}с challenge...")
         time.sleep(wait_s)
         if is_recaptcha_challenge(page):
-            print("[RECAPTCHA] Challenge появился (через фреймы)!")
+            print("[RECAPTCHA] Challenge появился (фреймы)!")
             return True
-
-    print("[RECAPTCHA] Challenge не найден через фреймы — пробую через скриншот...")
-    if detect_recaptcha_via_vision(page):
+    print("[RECAPTCHA] Challenge не найден через фреймы — пробую скриншот...")
+    from owl_llm import SCREENSHOT_PATH
+    if detect_recaptcha_via_vision(page, SCREENSHOT_PATH):
         print("[RECAPTCHA] Challenge найден через скриншот!")
         return True
-
-    print("[RECAPTCHA] Challenge не обнаружен ни через фреймы, ни через скриншот")
+    print("[RECAPTCHA] Challenge не обнаружен")
     return False
 
 
 def solve(page, max_rounds=5):
-    """Разгадывает reCAPTCHA challenge через LLM vision + pyautogui."""
     print("\n" + "█" * 55)
-    print("  RECAPTCHA SOLVER")
+    print("  RECAPTCHA SOLVER" + (" — DEBUG" if _debug() else ""))
     _debug_report()
     print("█" * 55)
-    _wait_step("СТАРТ", "Начинаю разгадывание reCAPTCHA")
+    _wait_step("СТАРТ", "Начинаю разгадывание")
 
     for round_idx in range(max_rounds):
-        print(f"\n{'─' * 55}")
-        print(f"  РАУНД {round_idx + 1}/{max_rounds}")
-        print(f"{'─' * 55}")
+        print(f"\n{'─' * 55}\n  РАУНД {round_idx + 1}/{max_rounds}\n{'─' * 55}")
+        _wait_step("ПРОВЕРКА РЕШЕНИЯ")
 
-        _wait_step("ПРОВЕРКА РЕШЕНИЯ", "Проверяю, не решена ли уже капча")
         if _is_solved(page):
             print("[RECAPTCHA] Уже решено!")
             return True
 
         challenge_text = get_challenge_text(page)
-        print(f"\n[RECAPTCHA] Текст задания: \"{challenge_text}\"")
-        _wait_step(
-            "ТЕКСТ ЗАДАНИЯ",
-            f"Модель прочитала инструкцию:\n  \"{challenge_text}\"\n\n"
-            "Если текст пустой или неверный — проблема с извлечением из bframe"
-        )
+        print(f"[RECAPTCHA] Текст: \"{challenge_text}\"")
+        _wait_step("ТЕКСТ ЗАДАНИЯ", f"\"{challenge_text}\"")
 
         if not challenge_text:
-            print("[RECAPTCHA] Текст задания не получен, жду 1с...")
+            print("[RECAPTCHA] Текст не получен, жду 1с...")
             time.sleep(1)
             continue
 
         bframe_box = _get_bframe_box(page)
-        print(f"\n[RECAPTCHA] bframe box: x={bframe_box['x']:.0f}, y={bframe_box['y']:.0f}, w={bframe_box['width']:.0f}, h={bframe_box['height']:.0f}")
         if not bframe_box:
             print("[RECAPTCHA] bframe не найден")
             return False
 
+        print(f"[RECAPTCHA] bframe box: {bframe_box['width']:.0f}x{bframe_box['height']:.0f}")
         bframe = _find_bframe(page)
-        iframe_el = bframe.frame_element()
-        iframe_el.screenshot(path=RECAPTCHA_SCREENSHOT_PATH, type="jpeg", quality=95)
-        print(f"\n[RECAPTCHA] Скриншот сохранён: {RECAPTCHA_SCREENSHOT_PATH}")
-        _wait_step(
-            "СКРИНШОТ СДЕЛАН",
-            f"Файл: {RECAPTCHA_SCREENSHOT_PATH}\n"
-            f"Размер bframe: {bframe_box['width']:.0f} x {bframe_box['height']:.0f} px\n\n"
-            "Открой файл и проверь, что на нём видны плитки reCAPTCHA"
-        )
+        bframe.frame_element().screenshot(path=RECAPTCHA_SCREENSHOT_PATH, type="jpeg", quality=95)
+        _wait_step("СКРИНШОТ", f"Файл: {RECAPTCHA_SCREENSHOT_PATH}")
 
-        print(f"\n>>> ОТПРАВЛЯЮ ЗАПРОС В LLM (reCAPTCHA)...")
-        print(f"    challenge: \"{challenge_text}\"")
-        print(f"    screenshot: {int(bframe_box['width'])}x{int(bframe_box['height'])}")
-        _wait_step(
-            "ПЕРЕД ЗАПРОСОМ К LLM",
-            f"Сейчас будет отправлен запрос к {API_URL}\n"
-            f"С системным промптом RECAPTCHA_SYSTEM_PROMPT\n"
-            f"Challenge: \"{challenge_text}\"\n"
-            f"Скриншот: {int(bframe_box['width'])}x{int(bframe_box['height'])} px\n\n"
-            "Нажми Enter чтобы отправить запрос"
-        )
+        print(f">>> ОТПРАВЛЯЮ ЗАПРОС В LLM challenge: \"{challenge_text}\"")
+        _wait_step("ПЕРЕД ЗАПРОСОМ К LLM")
+        result = ask_llm_for_clicks(challenge_text, RECAPTCHA_SCREENSHOT_PATH, bframe_box)
 
-        result = _ask_llm_for_clicks(challenge_text, RECAPTCHA_SCREENSHOT_PATH, bframe_box)
         if not result:
-            print("[RECAPTCHA] LLM не вернула валидный JSON")
-            _wait_step("ОШИБКА LLM", "Ответ модели не распарсился как JSON. Проверь RAW выше.")
+            print("[RECAPTCHA] LLM не вернула результат")
+            _wait_step("ОШИБКА LLM")
             _random_delay(0.5, 1)
             continue
 
-        print(f"\n[RECAPTCHA] ПАРСЕД ОТВЕТ: {json.dumps(result, ensure_ascii=False, indent=2)}")
-        _wait_step(
-            "ОТВЕТ LLM",
-            f"Модель вернула:\n{json.dumps(result, ensure_ascii=False, indent=2)}\n\n"
-            "Проверь: правильные ли выбраны координаты?"
-        )
+        print(f"[RECAPTCHA] ОТВЕТ LLM: {json.dumps(result, ensure_ascii=False, indent=2)}")
+        _wait_step("ОТВЕТ LLM")
 
         if result.get("done"):
-            print("[RECAPTCHA] ✅ LLM: уже решено")
+            print("[RECAPTCHA] LLM: уже решено")
             return True
-
         if result.get("skip"):
-            print("[RECAPTCHA] 🔄 LLM: нужно пропустить/обновить")
+            print("[RECAPTCHA] LLM: пропустить")
             skip_btn = _get_skip_button(page)
             if skip_btn:
-                print(f"[RECAPTCHA] Клик 'Пропустить' в ({skip_btn[0]}, {skip_btn[1]})")
-                _wait_step("КЛИК SKIP", f"Координаты кнопки Skip: ({skip_btn[0]}, {skip_btn[1]}) viewport")
+                _wait_step("КЛИК SKIP", f"({skip_btn[0]}, {skip_btn[1]})")
                 click_human_like(page, skip_btn[0], skip_btn[1])
             _random_delay(0.5, 1)
             continue
 
         raw_clicks = result.get("clicks", [])
         if not raw_clicks:
-            print("[RECAPTCHA] ⚠️ LLM не выбрала ни одной точки")
+            print("[RECAPTCHA] Нет кликов")
             skip_btn = _get_skip_button(page)
             if skip_btn:
                 click_human_like(page, skip_btn[0], skip_btn[1])
@@ -622,57 +366,46 @@ def solve(page, max_rounds=5):
             continue
 
         clicks_data = _snap_to_grid(raw_clicks, bframe_box, page)
-        print(f"[RECAPTCHA] Координаты: {len(raw_clicks)} raw → {len(clicks_data)} после snap+dedup")
+        print(f"[RECAPTCHA] Координаты: {len(raw_clicks)} raw -> {len(clicks_data)} после snap+dedup")
         for i, pt in enumerate(clicks_data):
             sx, sy = pt["x"], pt["y"]
             vx, vy = int(bframe_box["x"] + sx), int(bframe_box["y"] + sy)
-            print(f"    Клик {i+1}: screenshot({sx}, {sy}) → viewport({vx}, {vy})")
+            print(f"    {i+1}: screenshot({sx},{sy}) -> viewport({vx},{vy})")
 
-        _wait_step(
-            "КЛИКИ ПО ПЛИТКАМ",
-            f"Будет выполнено {len(clicks_data)} кликов:\n" +
-            "\n".join(
-                f"  {i+1}. viewport ({int(bframe_box['x']+p['x'])}, {int(bframe_box['y']+p['y'])})"
-                for i, p in enumerate(clicks_data)
-            ) +
-            "\n\nНажми Enter чтобы выполнить клики"
-        )
-
+        _wait_step("КЛИКИ ПО ПЛИТКАМ", f"{len(clicks_data)} кликов")
         for i, pt in enumerate(clicks_data):
             sx, sy = pt.get("x", 0), pt.get("y", 0)
             vx, vy = int(bframe_box["x"] + sx), int(bframe_box["y"] + sy)
-            print(f"[RECAPTCHA] Клик {i+1}/{len(clicks_data)} → viewport ({vx}, {vy})")
+            print(f"[RECAPTCHA] Клик {i+1}/{len(clicks_data)} -> ({vx}, {vy})")
             click_human_like(page, vx, vy)
-            if RECAPTCHA_DEBUG:
-                _wait_step(f"КЛИК {i+1} ВЫПОЛНЕН", f"Клик по ({vx}, {vy}) выполнен. Продолжить?")
+            if _debug():
+                _wait_step(f"КЛИК {i+1}")
             else:
                 _random_delay(0.25, 0.7)
 
         verify_btn = _get_verify_button(page)
         if verify_btn:
-            print(f"[RECAPTCHA] Кнопка 'Проверить': viewport ({verify_btn[0]}, {verify_btn[1]})")
-            _wait_step("КЛИК ПРОВЕРИТЬ", f"Координаты Verify: ({verify_btn[0]}, {verify_btn[1]})")
+            print(f"[RECAPTCHA] Verify в ({verify_btn[0]}, {verify_btn[1]})")
+            _wait_step("КЛИК ПРОВЕРИТЬ")
             _random_delay(0.4, 0.8)
             click_human_like(page, verify_btn[0], verify_btn[1])
         else:
-            print("[RECAPTCHA] ⚠️ Кнопка 'Проверить' не найдена в DOM bframe")
-            _wait_step("VERIFY НЕ НАЙДЕНА", "Проверь: может быть другая структура iframe?")
+            print("[RECAPTCHA] Verify не найдена")
+            _wait_step("VERIFY НЕ НАЙДЕНА")
 
-        if RECAPTCHA_DEBUG:
-            _wait_step("ОЖИДАНИЕ 2.5с", "Жду 2.5 секунды для проверки результата...")
         time.sleep(3)
 
         if _is_solved(page):
-            print("[RECAPTCHA] ✅ РЕШЕНО!")
-            _wait_step("РЕШЕНО", "reCAPTCHA успешно пройдена!")
+            print("[RECAPTCHA] РЕШЕНО!")
+            _wait_step("РЕШЕНО")
             return True
 
         incorrect = False
-        bframe_still_alive = False
+        bframe_alive = False
         try:
             bf = _find_bframe(page)
             if bf:
-                bframe_still_alive = True
+                bframe_alive = True
                 incorrect = bf.evaluate("""() => {
                     const el = document.querySelector('.rc-imageselect-incorrect-response');
                     return el && el.style.display !== 'none';
@@ -681,20 +414,17 @@ def solve(page, max_rounds=5):
             pass
 
         if incorrect:
-            print("[RECAPTCHA] ❌ Неправильный ответ")
-            _wait_step("НЕВЕРНО", "Модель выбрала не те плитки. Нажми Enter чтобы попробовать снова")
+            print("[RECAPTCHA] Неправильно")
+            _wait_step("НЕВЕРНО")
             _random_delay(0.8, 1.5)
             continue
-
-        if bframe_still_alive:
-            print("[RECAPTCHA] 🔄 Challenge обновился — новые картинки! Анализирую заново...")
-            _wait_step("ОБНОВЛЕНИЕ КАРТИНОК",
-                        "После verify появились новые/другие картинки. Начинаю новый раунд.")
+        if bframe_alive:
+            print("[RECAPTCHA] Новые картинки! Анализирую заново...")
+            _wait_step("ОБНОВЛЕНИЕ КАРТИНОК")
             time.sleep(1)
             continue
 
-        _wait_step("BFREAME ПРОПАЛ",
-                    "bframe больше нет на странице — возможно решено или страница изменилась. Продолжить?")
+        _wait_step("BFREAME ПРОПАЛ")
 
-    print("[RECAPTCHA] Достигнут лимит попыток")
+    print("[RECAPTCHA] Лимит попыток")
     return False

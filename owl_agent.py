@@ -1,6 +1,37 @@
+import os
 import json
 import time
 import traceback
+
+COOKIE_PATH = os.getenv("COOKIE_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.json"))
+
+SAVED_COOKIES = False
+
+
+def save_cookies(page):
+    global SAVED_COOKIES
+    try:
+        cookies = page.context.cookies()
+        with open(COOKIE_PATH, "w", encoding="utf-8") as f:
+            json.dump(cookies, f, ensure_ascii=False, indent=2)
+        print(f"[COOKIES] Сохранено {len(cookies)} кук в {COOKIE_PATH}")
+        SAVED_COOKIES = True
+    except Exception as e:
+        print(f"[COOKIES] Ошибка сохранения: {e}")
+
+
+def load_cookies(page):
+    if not os.path.exists(COOKIE_PATH):
+        print(f"[COOKIES] Файл {COOKIE_PATH} не найден")
+        return
+    try:
+        with open(COOKIE_PATH, "r", encoding="utf-8") as f:
+            cookies = json.load(f)
+        page.context.add_cookies(cookies)
+        print(f"[COOKIES] Загружено {len(cookies)} кук из {COOKIE_PATH}")
+    except Exception as e:
+        print(f"[COOKIES] Ошибка загрузки: {e}")
+
 
 from owl_browser import (
     create_browser,
@@ -76,7 +107,7 @@ def handle_google_block(page):
                     return True
 
             print(f"[GOOGLE BLOCK] Challenge не найден через фреймы — пробую через скриншот...")
-            if detect_recaptcha_via_vision(page):
+            if detect_recaptcha_via_vision(page, SCREENSHOT_PATH):
                 print("[GOOGLE BLOCK] Challenge найден через скриншот!")
                 return True
 
@@ -345,6 +376,7 @@ def main():
 
     try:
         playwright, browser, page = create_browser(headless=False)
+        load_cookies(page)
         page.goto("https://www.google.com", wait_until="domcontentloaded")
 
         for step in range(20):
@@ -379,6 +411,7 @@ def main():
                     if solved:
                         google_block_attempts = 0
                         print("[CAPTCHA] reCAPTCHA разгадана!")
+                        save_cookies(page)
                         time.sleep(0.5)
                         continue
                     else:
@@ -396,6 +429,7 @@ def main():
                 solved = solve_recaptcha(page)
                 if solved:
                     print("[CAPTCHA] reCAPTCHA разгадана! Продолжаю.")
+                    save_cookies(page)
                     time.sleep(0.5)
                     continue
                 else:
@@ -446,6 +480,7 @@ def main():
                     solved = solve_recaptcha(page)
                     if solved:
                         print("[CAPTCHA] reCAPTCHA разгадана! Продолжаю.")
+                        save_cookies(page)
                         time.sleep(0.5)
                         continue
                     else:

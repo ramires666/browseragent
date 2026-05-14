@@ -47,21 +47,24 @@ RECAPTCHA_SYSTEM_PROMPT = """
 You are solving a reCAPTCHA image challenge. Look at the screenshot: it shows a grid of square images and a challenge instruction at the top.
 
 Your job:
-1. Read the challenge instruction (e.g. "select all squares with traffic lights")
+1. Read the challenge instruction (e.g. "select all squares with traffic lights" or "select all images with a fire hydrant")
 2. Look at EVERY image in the grid carefully
-3. Return the (x, y) pixel center of EVERY image that matches
+3. Return the (x, y) pixel center of EVERY tile that matches
 
 The screenshot size (width x height) is provided below. Coordinates are in screenshot pixels, (0,0) = top-left.
 
 Return exactly this JSON format:
-{"clicks":[{"x":100,"y":80},{"x":280,"y":80},{"x":100,"y":200}],"reason":"these 3 contain traffic lights"}
+{"clicks":[{"x":100,"y":80},{"x":280,"y":80},{"x":100,"y":200}],"reason":"these 3 contain fire hydrant"}
 
-Rules:
-- CRITICAL: Find ALL matching images, not just one. Each matching image = one click.
-- Clicking a wrong image = FAIL. Missing a correct image = FAIL.
-- Click COORDINATES must be DISTINCT for each image (different x,y each time).
-- Coordinates should be the CENTER of each image tile.
-- If no images match: {"clicks":[],"skip":true,"reason":"none match"}
+CRITICAL RULES FOR SPLIT-OBJECT CHALLENGES:
+- The target object may be SPLIT across multiple adjacent tiles (like a puzzle).
+- Select EVERY tile that contains ANY PART of the target object — even a small corner, edge, or fragment.
+- Look at the BORDERS of each tile carefully: if part of the object is cut off at the edge of a tile,
+  the adjacent tile probably also contains a fragment.
+- Example: one bus might be spread across 4 tiles — ALL 4 must be selected.
+- Missing a tile that contains a small piece of the object = FAIL.
+- Click COORDINATES must be DISTINCT for each tile (different x,y each time).
+- If no tiles match: {"clicks":[],"skip":true,"reason":"none match"}
 - If green checkmark visible (already solved): {"done":true}
 - If tiles are unclear/blurry: {"skip":true}
 - Return ONLY valid JSON.
@@ -180,6 +183,66 @@ def _get_skip_button(page):
         return None
     except Exception:
         return None
+
+
+def _get_tiles(page):
+    """Достаёт центры плиток reCAPTCHA из bframe DOM."""
+    bframe = _find_bframe(page)
+    if not bframe:
+        return None
+    try:
+        iframe_box = bframe.frame_element().bounding_box()
+        if not iframe_box:
+            return None
+        tiles_rel = bframe.evaluate("""() => {
+            const cells = document.querySelectorAll('.rc-imageselect-tile, td[class*="tile"], td.rc-imageselect-tile, table.rc-imageselect-table td');
+            if (!cells.length) return [];
+            return Array.from(cells).map((el, i) => {
+                const r = el.getBoundingClientRect();
+                return { index: i, x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2) };
+            });
+        }""")
+        if not tiles_rel:
+            return None
+        tiles = []
+        for t in tiles_rel:
+            tiles.append({
+                "index": t["index"],
+                "x": int(iframe_box["x"] + t["x"]),
+                "y": int(iframe_box["y"] + t["y"]),
+            })
+        return tiles
+    except Exception as e:
+        print(f"[RECAPTCHA] get_tiles error: {e}")
+        return None
+
+
+def _snap_to_grid(coords, bframe_box, page):
+    """Привязывает координаты к центрам ближайших плиток reCAPTCHA."""
+    if not coords:
+        return coords
+    tiles = _get_tiles(page)
+    if not tiles:
+        print("[RECAPTCHA] snap_to_grid: плитки не найдены, возвращаю raw координаты")
+        return _dedup_coords(coords, threshold=20)
+
+    snapped = []
+    for c in coords:
+        cx, cy = c.get("x", 0), c.get("y", 0)
+        best_dist = 99999
+        best_tile = None
+        for t in tiles:
+            tx = t["x"] - bframe_box["x"]
+            ty = t["y"] - bframe_box["y"]
+            dist = (cx - tx) ** 2 + (cy - ty) ** 2
+            if dist < best_dist:
+                best_dist = dist
+                best_tile = (tx, ty)
+        if best_tile and best_dist < 40000:
+            snapped.append({"x": best_tile[0], "y": best_tile[1]})
+        else:
+            snapped.append(c)
+    return _dedup_coords(snapped, threshold=15)
 
 
 def _dedup_coords(clicks, threshold=25):
@@ -558,8 +621,8 @@ def solve(page, max_rounds=5):
             _random_delay(0.5, 1)
             continue
 
-        clicks_data = _dedup_coords(raw_clicks, threshold=20)
-        print(f"[RECAPTCHA] Координаты: {len(raw_clicks)} raw → {len(clicks_data)} после дедупликации")
+        clicks_data = _snap_to_grid(raw_clicks, bframe_box, page)
+        print(f"[RECAPTCHA] Координаты: {len(raw_clicks)} raw → {len(clicks_data)} после snap+dedup")
         for i, pt in enumerate(clicks_data):
             sx, sy = pt["x"], pt["y"]
             vx, vy = int(bframe_box["x"] + sx), int(bframe_box["y"] + sy)

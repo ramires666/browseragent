@@ -522,7 +522,7 @@ def solve(page, max_rounds=5):
         raw_clicks = result.get("clicks") or []
         tiles = result.get("tiles") or []
         clicks_data = []
-        scale = result.get("_scale", 1.0)
+        scale_val = result.get("_scale", 1.0)
 
         if raw_clicks:
             bw = int(bframe_box["width"])
@@ -542,17 +542,17 @@ def solve(page, max_rounds=5):
                 except (TypeError, ValueError):
                     print(f"[RECAPTCHA] клик {i} с некорректными координатами: {pt}, пропускаю")
                     continue
-                # Конвертация: screenshot px -> CSS px через scale
-                cx = fx / scale
-                cy = fy / scale
+                cx = fx / scale_val
+                cy = fy / scale_val
                 if cx > bw or cy > bh or cx < 0 or cy < 0:
-                    print(f"[RECAPTCHA] коорд ({fx},{fy}) ВНЕ iframe ({bw}x{bh}) после scale={scale} -> CSS({cx:.0f},{cy:.0f}) — пропускаю")
+                    print(f"[RECAPTCHA] коорд ({fx},{fy}) ВНЕ iframe ({bw}x{bh}) после scale={scale_val} -> CSS({cx:.0f},{cy:.0f}) — пропускаю")
                     continue
                 vx = int(bframe_box["x"] + cx)
                 vy = int(bframe_box["y"] + cy)
                 print(f"[RECAPTCHA] клик({fx},{fy})/scale->CSS({cx:.0f},{cy:.0f})->viewport({vx},{vy})")
                 clicks_data.append({"x": vx, "y": vy})
-        elif tiles:
+
+        if not clicks_data and tiles:
             cols = result.get("grid_cols", 3)
             rows = result.get("grid_rows", 3)
             bw = int(bframe_box["width"])
@@ -568,9 +568,9 @@ def solve(page, max_rounds=5):
                 clicks_data.append({"x": vx, "y": vy})
 
         if not clicks_data:
-            vy = int(bframe_box["y"] + pt["y"])
-            print(f"[RECAPTCHA] screenshot_click({pt['x']},{pt['y']}) -> viewport({vx},{vy})")
-            clicks_data.append({"x": vx, "y": vy})
+            print("[RECAPTCHA] нет валидных кликов, пропускаю раунд")
+            _random_delay(0.5, 1)
+            continue
 
         print(f"[RECAPTCHA] Совпало плиток: {len(clicks_data)}")
         for i, pt in enumerate(clicks_data):

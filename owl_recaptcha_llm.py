@@ -5,12 +5,12 @@ import requests
 from owl_llm import API_URL, API_KEY
 
 SYSTEM_PROMPT = """Look at the reCAPTCHA screenshot. Find ALL tiles that match the instruction.
-Return pixel coordinates (x,y) center of each matching tile.
+Return tile indices (0-8, left-to-right top-to-bottom).
 
 FORMAT:
-{"clicks":[{"x":100,"y":200},{"x":300,"y":200}],"reason":"why"}
+{"tiles":[0,3,5],"reason":"which tiles match and why"}
 
-If no matches: {"clicks":[],"skip":true}
+If no matches: {"tiles":[],"skip":true}
 If done: {"done":true}"""
 
 
@@ -71,11 +71,15 @@ def _parse_reasoning(raw):
 
 
 def _normalize_result(parsed):
-    """Приводит любой формат ответа LLM к {"clicks":[{"x":int,"y":int}]}."""
+    """Приводит любой формат ответа LLM к {"clicks":[{"x":int,"y":int}]}
+    или {"tiles":[...], "grid_cols":N, "grid_rows":M}."""
     if not parsed:
         return None
-    if isinstance(parsed, dict) and "clicks" in parsed:
-        return parsed
+    if isinstance(parsed, dict):
+        if "clicks" in parsed:
+            return parsed
+        if "tiles" in parsed:
+            return parsed
     if isinstance(parsed, list):
         clicks = []
         for item in parsed:
@@ -103,7 +107,7 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": [
-                {"type": "text", "text": f"The image is {img_w}x{img_h} pixels. Grid is 3x3 tiles. Return tile center pixel coordinates WITHIN [0,{img_w}] x [0,{img_h}] bounds."},
+                {"type": "text", "text": f"Image is {img_w}x{img_h}px. 3x3 grid. Tiles numbered 0-8 left-to-right, top-to-bottom. Return tile indices that match."},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
             ]}
         ],

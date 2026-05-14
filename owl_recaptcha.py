@@ -480,16 +480,55 @@ def solve(page, max_rounds=5):
                     click_human_like(page, skip_btn[0], skip_btn[1])
                 _random_delay(0.5, 1)
                 continue
-            print(f"[RECAPTCHA] Совпало плиток: {len(clicks_data)}")
-            _wait_step("КЛИКИ ПО ПЛИТКАМ", f"{len(clicks_data)} кликов")
-            for i, pt in enumerate(clicks_data):
-                cx, cy = pt["x"], pt["y"]
-                print(f"[RECAPTCHA] Клик {i+1}/{len(clicks_data)} -> ({cx}, {cy})")
-                click_human_like(page, cx, cy)
-                if _debug():
-                    _wait_step(f"КЛИК {i+1}")
-                else:
-                    _random_delay(0.25, 0.7)
+        else:
+            if result.get("done"):
+                print("[RECAPTCHA] LLM: уже решено")
+                return True
+            if result.get("skip"):
+                print("[RECAPTCHA] LLM: пропустить")
+                skip_btn = _get_skip_button(page)
+                if skip_btn:
+                    _wait_step("КЛИК SKIP", f"({skip_btn[0]}, {skip_btn[1]})")
+                    click_human_like(page, skip_btn[0], skip_btn[1])
+                _random_delay(0.5, 1)
+                continue
+
+            raw_clicks = result.get("clicks") or []
+            if raw_clicks and isinstance(raw_clicks[0], dict) and "x" in raw_clicks[0] and "y" in raw_clicks[0]:
+                clicks_data = []
+                for pt in raw_clicks:
+                    vx = int(bframe_box["x"] + pt["x"])
+                    vy = int(bframe_box["y"] + pt["y"])
+                    print(f"[RECAPTCHA] screenshot_click({pt['x']},{pt['y']}) -> viewport({vx},{vy})")
+                    clicks_data.append({"x": vx, "y": vy})
+            else:
+                raw_tiles = _extract_tile_indices(result)
+                if raw_tiles is None:
+                    raw_tiles = []
+                clicks_data = _tiles_to_clicks(raw_tiles, result, bframe_box, page)
+
+            if not clicks_data:
+                print("[RECAPTCHA] Нет совпавших плиток/кликов")
+                skip_btn = _get_skip_button(page)
+                if skip_btn:
+                    click_human_like(page, skip_btn[0], skip_btn[1])
+                _random_delay(0.5, 1)
+                continue
+
+        print(f"[RECAPTCHA] Совпало плиток: {len(clicks_data)}")
+        for i, pt in enumerate(clicks_data):
+            vx, vy = pt["x"], pt["y"]
+            print(f"    {i+1}: viewport({vx},{vy})")
+
+        _wait_step("КЛИКИ ПО ПЛИТКАМ", f"{len(clicks_data)} кликов")
+        for i, pt in enumerate(clicks_data):
+            cx, cy = pt.get("x", 0), pt.get("y", 0)
+            print(f"[RECAPTCHA] Клик {i+1}/{len(clicks_data)} -> ({cx}, {cy})")
+            click_human_like(page, cx, cy)
+            if _debug():
+                _wait_step(f"КЛИК {i+1}")
+            else:
+                _random_delay(0.25, 0.7)
             continue
 
         if result.get("done"):
@@ -526,7 +565,6 @@ def solve(page, max_rounds=5):
             _random_delay(0.5, 1)
             continue
 
-        clicks_data = _tiles_to_clicks(raw_tiles, result, bframe_box, page)
         print(f"[RECAPTCHA] Совпало плиток: {len(clicks_data)}")
         for i, pt in enumerate(clicks_data):
             vx, vy = pt["x"], pt["y"]

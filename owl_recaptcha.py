@@ -467,7 +467,15 @@ def solve(page, max_rounds=5):
 
         print(f"[RECAPTCHA] bframe box: {bframe_box['width']:.0f}x{bframe_box['height']:.0f}")
         bframe = _find_bframe(page)
-        bframe.frame_element().screenshot(path=RECAPTCHA_SCREENSHOT_PATH, type="jpeg", quality=95)
+        bframe_el = bframe.frame_element()
+        try:
+            is_visible = bframe_el.is_visible()
+        except Exception:
+            is_visible = False
+        if not is_visible:
+            print("[RECAPTCHA] bframe невидим — челлендж пропал, перезапускаю")
+            return False
+        bframe_el.screenshot(path=RECAPTCHA_SCREENSHOT_PATH, type="jpeg", quality=95)
         _wait_step("СКРИНШОТ", f"Файл: {RECAPTCHA_SCREENSHOT_PATH}")
 
         print(f">>> ОТПРАВЛЯЮ ЗАПРОС В LLM challenge: \"{challenge_text}\"")

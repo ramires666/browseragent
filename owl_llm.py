@@ -9,8 +9,9 @@ load_dotenv()
 API_KEY = os.getenv("LLM_API_KEY", "")
 API_URL = os.getenv("API_URL", "http://127.0.0.1:8080/v1/chat/completions")
 SCREENSHOT_PATH = os.getenv("SCREENSHOT_PATH", r"W:\_python\OWL\browser_screen.jpg")
+SYSTEM_PROMPT_PATH = os.getenv("SYSTEM_PROMPT_PATH", "system_prompt.txt")
 
-SYSTEM_PROMPT = """
+_SYSTEM_PROMPT_HARDCODED = """\
 You are a browser automation agent.
 
 You receive:
@@ -40,6 +41,18 @@ Rules:
 - One action per step.
 - If the task is complete, return done.
 """
+
+def _load_system_prompt():
+    try:
+        with open(SYSTEM_PROMPT_PATH, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            if content:
+                return content
+    except Exception:
+        pass
+    return _SYSTEM_PROMPT_HARDCODED
+
+SYSTEM_PROMPT = _load_system_prompt()
 
 
 def build_element_text(elements):

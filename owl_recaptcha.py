@@ -216,10 +216,10 @@ def _extract_grid(result):
         y = d.get("y") or d.get("start_y")
         cw = d.get("cell_w") or d.get("cell_width") or d.get("width")
         ch = d.get("cell_h") or d.get("cell_height") or d.get("height")
+        cols = d.get("cols")
+        rows = d.get("rows")
         if x is not None and y is not None and cw and ch:
-            cols = d.get("cols")
-            rows = d.get("rows")
-            if not cols and cw:
+            if not cols:
                 grid_w = d.get("width") or d.get("grid_width")
                 if grid_w:
                     cols = max(1, round(grid_w / cw))
@@ -229,6 +229,9 @@ def _extract_grid(result):
                 rows = 3
             print(f"[RECAPTCHA] grid из '{key}': x={x} y={y} cell={cw}x{ch} {cols}x{rows}")
             return {"x": int(x), "y": int(y), "cell_w": int(cw), "cell_h": int(ch), "cols": int(cols), "rows": int(rows)}
+        if cols and rows:
+            print(f"[RECAPTCHA] grid из '{key}': {cols}x{rows} (без пиксельных границ)")
+            return {"cols": int(cols), "rows": int(rows)}
     return None
 
 
@@ -244,15 +247,30 @@ def _tiles_to_clicks(raw_tiles, result, bframe_box, page):
 
     grid = _extract_grid(result)
     if grid:
+        if "x" in grid and "y" in grid:
+            clicks = []
+            for idx in raw_tiles:
+                col = idx % grid["cols"]
+                row = idx // grid["cols"]
+                scr_x = grid["x"] + col * grid["cell_w"] + grid["cell_w"] // 2
+                scr_y = grid["y"] + row * grid["cell_h"] + grid["cell_h"] // 2
+                vp_x = int(bframe_box["x"] + scr_x)
+                vp_y = int(bframe_box["y"] + scr_y)
+                print(f"[RECAPTCHA] tile {idx} (row={row} col={col}): screenshot_center({scr_x},{scr_y}) -> viewport({vp_x},{vp_y})")
+                clicks.append({"x": vp_x, "y": vp_y, "index": idx})
+            return clicks
+        print(f"[RECAPTCHA] grid только {grid['cols']}x{grid['rows']}, расчитываю центры из bframe_box")
+        bw = int(bframe_box["width"])
+        bh = int(bframe_box["height"])
+        cw = bw // grid["cols"]
+        ch = bh // grid["rows"]
         clicks = []
         for idx in raw_tiles:
             col = idx % grid["cols"]
             row = idx // grid["cols"]
-            scr_x = grid["x"] + col * grid["cell_w"] + grid["cell_w"] // 2
-            scr_y = grid["y"] + row * grid["cell_h"] + grid["cell_h"] // 2
-            vp_x = int(bframe_box["x"] + scr_x)
-            vp_y = int(bframe_box["y"] + scr_y)
-            print(f"[RECAPTCHA] tile {idx} (row={row} col={col}): screenshot_center({scr_x},{scr_y}) -> viewport({vp_x},{vp_y})")
+            vp_x = int(bframe_box["x"]) + col * cw + cw // 2
+            vp_y = int(bframe_box["y"]) + row * ch + ch // 2
+            print(f"[RECAPTCHA] tile {idx} (row={row} col={col}): viewport({vp_x},{vp_y})")
             clicks.append({"x": vp_x, "y": vp_y, "index": idx})
         return clicks
 

@@ -176,10 +176,68 @@ def _llm_request(payload, label):
             except json.JSONDecodeError:
                 pass
 
+        print(f"[{label}] Парсю reasoning text для (Contains ...) маркеров...")
+        parsed = _parse_captcha_reasoning(raw)
+        if parsed:
+            return parsed
+
         return None
     except Exception as e:
         print(f"[{label}] Ошибка запроса: {e}")
         return None
+
+
+def _parse_captcha_reasoning(text):
+    """Парсит reasoning-текст модели: ищет Row/Col (Contains ...) маркеры.
+    Пример: 'Row 1, Col 1: A bicycle leaning. (Contains bicycle)'
+    Возвращает: {"tiles": [0, 4, 6], "grid": {"cols": 3, "rows": 3, ...}}
+    или None при неудаче."""
+    import re
+
+    grid_match = re.search(r'(\d+)\s*x\s*(\d+)\s*grid', text, re.IGNORECASE)
+    if grid_match:
+        rows, cols = int(grid_match.group(1)), int(grid_match.group(2))
+    else:
+        grid_match = re.search(r'(\d+)\s*rows?\s*(?:and\s*)?(\d+)\s*cols?', text, re.IGNORECASE)
+        if grid_match:
+            rows, cols = int(grid_match.group(1)), int(grid_match.group(2))
+        else:
+            rows, cols = 3, 3
+
+    contains_indices = set()
+    lines = text.split('\n')
+    for line in lines:
+        match = re.search(r'[Rr]ow\s*(\d+)\s*[;,:]\s*[Cc]ol(?:umn)?\s*(\d+)', line)
+        if not match:
+            match = re.search(r'[Rr]ow\s*(\d+)\s*[;,:].*?[Cc]ol(?:umn)?\s*(\d+)', line)
+        if match:
+            r, c = int(match.group(1)) - 1, int(match.group(2)) - 1
+            if 0 <= r < rows and 0 <= c < cols and re.search(r'\(Contains', line, re.IGNORECASE):
+                idx = r * cols + c
+                contains_indices.add(idx)
+
+    if contains_indices:
+        result = {"tiles": sorted(list(contains_indices)), "grid": {"cols": cols, "rows": rows}}
+        print(f"[RECAPTCHA PARSED] из reasoning: tiles={result['tiles']} grid={cols}x{rows}")
+        return result
+
+    contains_indices = set()
+    for line in lines:
+        if re.search(r'\(Contains', line, re.IGNORECASE):
+            col_match = re.search(r'[Cc]ol(?:umn)?\s*(\d+)', line)
+            row_match = re.search(r'[Rr]ow\s*(\d+)', line)
+            if col_match and row_match:
+                r, c = int(row_match.group(1)) - 1, int(col_match.group(2)) - 1
+                if 0 <= r < rows and 0 <= c < cols:
+                    idx = r * cols + c
+                    contains_indices.add(idx)
+
+    if contains_indices:
+        result = {"tiles": sorted(list(contains_indices)), "grid": {"cols": cols, "rows": rows}}
+        print(f"[RECAPTCHA PARSED] из reasoning: tiles={result['tiles']} grid={cols}x{rows}")
+        return result
+
+    return None
 
 
 def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):

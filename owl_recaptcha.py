@@ -3,44 +3,47 @@ import time
 import base64
 import requests
 from owl_llm import API_URL, API_KEY
-from owl_clicker import click_fallback
+from owl_clicker import click_human_like
 
 RECAPTCHA_SCREENSHOT_PATH = r"W:\_python\OWL\_recaptcha_challenge.jpg"
 
 RECAPTCHA_SYSTEM_PROMPT = """
-You are solving a reCAPTCHA image challenge.
+You are solving a reCAPTCHA image challenge. You look at a screenshot showing a grid of images and a challenge instruction.
 
-You receive:
-1. Challenge instruction text (e.g. "Select all squares with traffic lights")
-2. A screenshot of the image grid
+Your job:
+1. Understand the challenge (e.g. "select all squares with traffic lights")
+2. Find every image that matches
+3. Return the exact (x, y) pixel coordinates of the CENTER of each matching image
 
-Identify which tiles match the challenge description.
+The screenshot dimensions are known to you. Return coordinates in screenshot pixels.
 
 Return exactly one JSON object:
 {
-  "tiles": [0, 3, 5],
-  "reason": "these contain traffic lights"
+  "clicks": [{"x": 120, "y": 80}, {"x": 300, "y": 80}, {"x": 120, "y": 200}],
+  "reason": "these three images contain traffic lights"
 }
 
 Rules:
-- Tile index 0 = top-left. Read left-to-right, top-to-bottom.
-- If no tiles match the instruction, return {"tiles": [], "reason": "none match"}
-- If the challenge is already solved (green checkmark visible), return {"done": true}
-- If the images are unclear and you need new ones, return {"skip": true}
+- Coordinates must be pixel positions from the TOP-LEFT of the screenshot.
+- Include ALL matching images. Clicking a wrong image will fail the challenge.
+- If no images match, return {"clicks": [], "skip": true, "reason": "none match, need new images"}
+- If challenge is already solved (green checkmark visible), return {"done": true}
+- If images are unclear, return {"skip": true}
 - Return ONLY valid JSON, no extra text.
 """
+
+
+def _random_delay(min_s=0.15, max_s=0.5):
+    time.sleep(random.uniform(min_s, max_s))
+
+
+def _human_like_click(page, vx, vy):
+    click_human_like(page, vx, vy)
 
 
 def _find_bframe(page):
     for frame in page.frames:
         if "recaptcha/api2/bframe" in frame.url.lower():
-            return frame
-    return None
-
-
-def _find_anchor_frame(page):
-    for frame in page.frames:
-        if "recaptcha/api2/anchor" in frame.url.lower():
             return frame
     return None
 
@@ -61,34 +64,13 @@ def get_challenge_text(page):
         return None
 
 
-def _get_tiles(page):
+def _get_bframe_box(page):
     bframe = _find_bframe(page)
     if not bframe:
         return None
     try:
-        iframe_box = bframe.frame_element().bounding_box()
-        if not iframe_box:
-            return None
-        tiles_rel = bframe.evaluate("""() => {
-            const cells = document.querySelectorAll('.rc-imageselect-tile, td[class*="tile"], td.rc-imageselect-tile');
-            if (!cells.length) return [];
-            return Array.from(cells).map((el, i) => {
-                const r = el.getBoundingClientRect();
-                return { index: i, x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2) };
-            });
-        }""")
-        if not tiles_rel:
-            return None
-        tiles = []
-        for t in tiles_rel:
-            tiles.append({
-                "index": t["index"],
-                "x": int(iframe_box["x"] + t["x"]),
-                "y": int(iframe_box["y"] + t["y"]),
-            })
-        return tiles
-    except Exception as e:
-        print(f"[RECAPTCHA] get_tiles error: {e}")
+        return bframe.frame_element().bounding_box()
+    except Exception:
         return None
 
 
@@ -134,9 +116,12 @@ def _get_skip_button(page):
         return None
 
 
-def _ask_llm_for_tiles(challenge_text, screenshot_path):
+def _ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
     with open(screenshot_path, "rb") as f:
         image_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+    w = int(bframe_box["width"])
+    h = int(bframe_box["height"])
 
     payload = {
         "model": "gui-owl",
@@ -145,13 +130,20 @@ def _ask_llm_for_tiles(challenge_text, screenshot_path):
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": f"Challenge: {challenge_text}\nWhich tiles match?"},
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Screenshot size: {w}x{h} pixels.\n"
+                            f"Challenge text: \"{challenge_text}\"\n\n"
+                            "Return (x,y) center coordinates of each matching tile."
+                        )
+                    },
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
                 ]
             }
         ],
         "temperature": 0.1,
-        "max_tokens": 300,
+        "max_tokens": 500,
         "stream": False,
     }
 
@@ -203,7 +195,7 @@ def is_recaptcha_challenge(page):
 
 
 def solve(page, max_rounds=5):
-    """Разгадывает reCAPTCHA challenge. Возвращает True если успешно."""
+    """Разгадывает reCAPTCHA challenge через LLM vision + pyautogui."""
     print("[RECAPTCHA] === НАЧАЛО РАЗГАДЫВАНИЯ ===")
 
     for round_idx in range(max_rounds):
@@ -217,21 +209,22 @@ def solve(page, max_rounds=5):
         print(f"[RECAPTCHA] Текст задания: {challenge_text}")
 
         if not challenge_text:
-            print("[RECAPTCHA] Не удалось получить текст задания, жду 1с и пробую снова...")
+            print("[RECAPTCHA] Не удалось получить текст задания, жду 1с...")
             time.sleep(1)
             continue
 
-        bframe = _find_bframe(page)
-        if not bframe:
-            print("[RECAPTCHA] bframe потерян")
+        bframe_box = _get_bframe_box(page)
+        if not bframe_box:
+            print("[RECAPTCHA] bframe не найден")
             return False
 
+        bframe = _find_bframe(page)
         iframe_el = bframe.frame_element()
         iframe_el.screenshot(path=RECAPTCHA_SCREENSHOT_PATH, type="jpeg", quality=90)
 
-        result = _ask_llm_for_tiles(challenge_text, RECAPTCHA_SCREENSHOT_PATH)
+        result = _ask_llm_for_clicks(challenge_text, RECAPTCHA_SCREENSHOT_PATH, bframe_box)
         if not result:
-            time.sleep(1)
+            _random_delay(0.5, 1)
             continue
 
         if result.get("done"):
@@ -242,41 +235,33 @@ def solve(page, max_rounds=5):
             print("[RECAPTCHA] LLM хочет пропустить (новые картинки)")
             skip_btn = _get_skip_button(page)
             if skip_btn:
-                click_fallback(page, skip_btn[0], skip_btn[1])
-                print(f"[RECAPTCHA] Кликнул 'Пропустить/Обновить' через pyautogui")
-            time.sleep(1)
+                _human_like_click(page, skip_btn[0], skip_btn[1])
+            _random_delay(0.5, 1)
             continue
 
-        tiles_to_click = result.get("tiles", [])
-        if not tiles_to_click:
-            print("[RECAPTCHA] LLM не выбрала ни одной плитки. Пропускаю раунд.")
+        clicks_data = result.get("clicks", [])
+        if not clicks_data:
+            print("[RECAPTCHA] LLM не выбрала ни одной точки. Пропускаю.")
             skip_btn = _get_skip_button(page)
             if skip_btn:
-                click_fallback(page, skip_btn[0], skip_btn[1])
-                print(f"[RECAPTCHA] Кликнул 'Пропустить'")
-            time.sleep(1)
+                _human_like_click(page, skip_btn[0], skip_btn[1])
+            _random_delay(0.5, 1)
             continue
 
-        tiles = _get_tiles(page)
-        if not tiles:
-            print("[RECAPTCHA] Не удалось получить позиции плиток, жду...")
-            time.sleep(1)
-            continue
-
-        for t_idx in tiles_to_click:
-            matched = [t for t in tiles if t["index"] == t_idx]
-            if matched:
-                t = matched[0]
-                print(f"[RECAPTCHA] Клик по плитке {t_idx} через pyautogui (viewport {t['x']}, {t['y']})")
-                click_fallback(page, t["x"], t["y"])
-                time.sleep(0.3)
-            else:
-                print(f"[RECAPTCHA] Плитка с индексом {t_idx} не найдена")
+        for pt in clicks_data:
+            sx = pt.get("x", 0)
+            sy = pt.get("y", 0)
+            vx = int(bframe_box["x"] + sx)
+            vy = int(bframe_box["y"] + sy)
+            print(f"[RECAPTCHA] Клик по координатам ({vx}, {vy}) через pyautogui (jitter + random delay)")
+            _human_like_click(page, vx, vy)
+            _random_delay(0.2, 0.6)
 
         verify_btn = _get_verify_button(page)
         if verify_btn:
-            print(f"[RECAPTCHA] Клик 'Проверить' через pyautogui (viewport {verify_btn[0]}, {verify_btn[1]})")
-            click_fallback(page, verify_btn[0], verify_btn[1])
+            print(f"[RECAPTCHA] Клик 'Проверить' через pyautogui ({verify_btn[0]}, {verify_btn[1]})")
+            _random_delay(0.3, 0.7)
+            _human_like_click(page, verify_btn[0], verify_btn[1])
         else:
             print("[RECAPTCHA] Кнопка 'Проверить' не найдена")
 
@@ -286,13 +271,19 @@ def solve(page, max_rounds=5):
             print("[RECAPTCHA] РЕШЕНО!")
             return True
 
-        incorrect = page.evaluate("""() => {
-            const el = document.querySelector('.rc-imageselect-incorrect-response');
-            return el && el.style.display !== 'none';
-        }""")
+        incorrect = False
+        try:
+            bf = _find_bframe(page)
+            if bf:
+                incorrect = bf.evaluate("""() => {
+                    const el = document.querySelector('.rc-imageselect-incorrect-response');
+                    return el && el.style.display !== 'none';
+                }""")
+        except Exception:
+            pass
         if incorrect:
             print("[RECAPTCHA] Неправильный ответ, пробую снова...")
-            time.sleep(1)
+            _random_delay(0.5, 1)
             continue
 
     print("[RECAPTCHA] Достигнут лимит попыток")

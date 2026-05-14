@@ -1,4 +1,5 @@
 import time
+import random
 import pyautogui
 import pygetwindow as gw
 
@@ -60,6 +61,27 @@ def click_fallback(page, vx, vy):
     time.sleep(0.1)
     pyautogui.click()
     time.sleep(0.3)
+
+
+def click_human_like(page, vx, vy):
+    """Человекоподобный клик pyautogui: jitter + кривая траектория + случайная задержка."""
+    jx = random.randint(-3, 3)
+    jy = random.randint(-3, 3)
+    sx, sy = viewport_to_screen(page, vx + jx, vy + jy)
+    _focus_browser_window(page)
+
+    dest_x = sx + random.randint(-2, 2)
+    dest_y = sy + random.randint(-2, 2)
+
+    pyautogui.moveTo(
+        dest_x + random.randint(-50, 50),
+        dest_y + random.randint(-50, 50),
+        duration=random.uniform(0.1, 0.25)
+    )
+    pyautogui.moveTo(dest_x, dest_y, duration=random.uniform(0.08, 0.2))
+    time.sleep(random.uniform(0.05, 0.15))
+    pyautogui.click()
+    time.sleep(random.uniform(0.15, 0.35))
 
 
 def double_click_fallback(page, vx, vy):

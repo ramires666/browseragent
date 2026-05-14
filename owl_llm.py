@@ -11,6 +11,7 @@ API_URL = os.getenv("API_URL", "http://127.0.0.1:8080/v1/chat/completions")
 SCREENSHOT_PATH = os.getenv("SCREENSHOT_PATH", r"W:\_python\OWL\browser_screen.jpg")
 SYSTEM_PROMPT_PATH = os.getenv("SYSTEM_PROMPT_PATH", "system_prompt.txt")
 JSON_SCHEMA_ENABLED = os.getenv("JSON_SCHEMA_ENABLED", "").lower() in ("1", "true", "yes")
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "800"))
 
 _SYSTEM_PROMPT_HARDCODED = """\
 You are a browser automation agent.
@@ -54,6 +55,38 @@ def _load_system_prompt():
     return _SYSTEM_PROMPT_HARDCODED
 
 SYSTEM_PROMPT = _load_system_prompt()
+
+
+def repair_json(text):
+    stripped = text.strip()
+    if not stripped:
+        return stripped
+    try:
+        json.loads(stripped)
+        return stripped
+    except json.JSONDecodeError:
+        pass
+    if stripped.count("{") > stripped.count("}"):
+        stripped += "}"
+    if stripped.count("[") > stripped.count("]"):
+        stripped += "]"
+    try:
+        json.loads(stripped)
+        return stripped
+    except json.JSONDecodeError:
+        pass
+    if stripped.rstrip().endswith('"') and not stripped.rstrip().endswith('\\"'):
+        pass
+    else:
+        idx = stripped.rfind(':"')
+        if idx > 0 and not stripped.endswith('"}'):
+            stripped += '"}'
+    try:
+        json.loads(stripped)
+        return stripped
+    except json.JSONDecodeError:
+        pass
+    return text
 
 
 def build_element_text(elements):
@@ -105,7 +138,7 @@ Visible interactive elements:
             }
         ],
         "temperature": 0.1,
-        "max_tokens": 300,
+        "max_tokens": MAX_TOKENS,
         "stream": False,
     }
 
@@ -144,4 +177,9 @@ Visible interactive elements:
     print("[MODEL BODY]", r.text)
     r.raise_for_status()
     data = r.json()
-    return data["choices"][0]["message"]["content"]
+    raw = data["choices"][0]["message"]["content"]
+    repaired = repair_json(raw)
+    if repaired != raw:
+        print("[REPAIR JSON] было:", raw[-100:])
+        print("[REPAIR JSON] стало:", repaired[-100:])
+    return repaired

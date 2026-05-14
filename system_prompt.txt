@@ -23,7 +23,6 @@ Allowed actions:
 {"action":"done","reason":"task completed"}
 
 Rules:
-- Output exactly one object.
 - Return only valid JSON.
 - Prefer using the provided element ids.
 - Use only ids that exist in the element list.
@@ -32,3 +31,4 @@ Rules:
 - If an input/textarea is already focused, prefer type or press.
 - One action per step.
 - If the task is complete, return done.
+- Keep the "reason" field SHORT — max 10 words. Do not exceed 200 total tokens.

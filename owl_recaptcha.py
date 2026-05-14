@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import time
 import random
 import base64
@@ -8,16 +9,30 @@ from dotenv import load_dotenv
 from owl_llm import API_URL, API_KEY
 from owl_clicker import click_human_like
 
-load_dotenv()
+_ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+load_dotenv(dotenv_path=_ENV_PATH, override=True)
+load_dotenv(override=True)
 
-RECAPTCHA_SCREENSHOT_PATH = r"W:\_python\OWL\_recaptcha_challenge.jpg"
+RECAPTCHA_SCREENSHOT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_recaptcha_challenge.jpg")
 
 
 def _debug():
-    return os.getenv("RECAPTCHA_DEBUG", "").lower() in ("1", "true", "yes")
+    val = os.getenv("RECAPTCHA_DEBUG", "")
+    return val.lower() in ("1", "true", "yes")
+
+
+def _debug_report():
+    val = os.getenv("RECAPTCHA_DEBUG", "(not set)")
+    print(f"[RECAPTCHA DEBUG] os.getenv('RECAPTCHA_DEBUG') = \"{val}\"")
+    print(f"[RECAPTCHA DEBUG] _debug() = {_debug()}")
+
+
+print(f"\n[OWL_RECAPTCHA] Модуль загружен | .env: {_ENV_PATH}")
+_debug_report()
 
 
 def _wait_step(label, detail=None):
+    print(f"\n[WAIT_STEP] вызван: \"{label}\" | RECAPTCHA_DEBUG={_debug()}")
     if not _debug():
         return
     print(f"\n{'=' * 55}")
@@ -279,10 +294,9 @@ def is_recaptcha_challenge(page):
 
 def solve(page, max_rounds=5):
     """Разгадывает reCAPTCHA challenge через LLM vision + pyautogui."""
-    dbg = _debug()
     print("\n" + "█" * 55)
-    print("  RECAPTCHA SOLVER" + (" — DEBUG РЕЖИМ (RECAPTCHA_DEBUG=true)" if dbg else ""))
-    print("  Каждый шаг" if dbg else "  Автоматический режим")
+    print("  RECAPTCHA SOLVER")
+    _debug_report()
     print("█" * 55)
     _wait_step("СТАРТ", "Начинаю разгадывание reCAPTCHA")
 

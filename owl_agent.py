@@ -17,7 +17,11 @@ from owl_clicker import (
     press_fallback,
     find_element_coords
 )
-from owl_recaptcha import is_recaptcha_challenge, solve as solve_recaptcha
+from owl_recaptcha import (
+    is_recaptcha_challenge,
+    has_recaptcha_on_page,
+    solve as solve_recaptcha
+)
 
 
 CAPTCHA_KEYWORDS = [
@@ -253,6 +257,15 @@ def main():
                 else:
                     print("[CAPTCHA] Авторазгадывание не помогло — прошу помощи вручную.")
 
+            if has_recaptcha_on_page(page):
+                print("\n[!] reCAPTCHA на странице, но авторешение не сработало")
+                print("    Разгадай reCAPTCHA вручную в окне браузера,")
+                print("    затем нажми Enter чтобы продолжить...")
+                input("    >> ")
+                print("[CONTINUE]")
+                time.sleep(1)
+                continue
+
             page.screenshot(path=SCREENSHOT_PATH, type="jpeg", quality=85, full_page=False)
 
             print(f"\n>>> ОТПРАВЛЯЮ ПРОМПТ | Задача: \"{task}\" | Элементов: {len(elements)} | История: {len(history)} шагов")
@@ -293,6 +306,14 @@ def main():
                         continue
                     else:
                         print("[CAPTCHA] Авторазгадывание не помогло — прошу помощи.")
+
+                if has_recaptcha_on_page(page):
+                    print("\n[!] reCAPTCHA на странице, авторешение не сработало")
+                    print("    Разгадай вручную, затем нажми Enter...")
+                    input("    >> ")
+                    print("[CONTINUE]")
+                    time.sleep(1)
+                    continue
 
                 print("\n[!] ОБНАРУЖЕНА КАПЧА / ПРОВЕРКА БЕЗОПАСНОСТИ")
                 print("    Подтверди капчу вручную в окне браузера,")

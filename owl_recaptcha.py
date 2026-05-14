@@ -4,15 +4,21 @@ import time
 import random
 import base64
 import requests
+from dotenv import load_dotenv
 from owl_llm import API_URL, API_KEY
 from owl_clicker import click_human_like
 
+load_dotenv()
+
 RECAPTCHA_SCREENSHOT_PATH = r"W:\_python\OWL\_recaptcha_challenge.jpg"
-RECAPTCHA_DEBUG = os.getenv("RECAPTCHA_DEBUG", "").lower() in ("1", "true", "yes")
+
+
+def _debug():
+    return os.getenv("RECAPTCHA_DEBUG", "").lower() in ("1", "true", "yes")
 
 
 def _wait_step(label, detail=None):
-    if not RECAPTCHA_DEBUG:
+    if not _debug():
         return
     print(f"\n{'=' * 55}")
     print(f"  [{label}]")
@@ -273,8 +279,10 @@ def is_recaptcha_challenge(page):
 
 def solve(page, max_rounds=5):
     """Разгадывает reCAPTCHA challenge через LLM vision + pyautogui."""
+    dbg = _debug()
     print("\n" + "█" * 55)
-    print("  █ RECAPTCHA SOLVER — DEBUG РЕЖИМ" if RECAPTCHA_DEBUG else "  RECAPTCHA SOLVER")
+    print("  RECAPTCHA SOLVER" + (" — DEBUG РЕЖИМ (RECAPTCHA_DEBUG=true)" if dbg else ""))
+    print("  Каждый шаг" if dbg else "  Автоматический режим")
     print("█" * 55)
     _wait_step("СТАРТ", "Начинаю разгадывание reCAPTCHA")
 

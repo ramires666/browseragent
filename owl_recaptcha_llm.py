@@ -195,6 +195,8 @@ def _parse_captcha_reasoning(text):
     import re
 
     grid_match = re.search(r'(\d+)\s*x\s*(\d+)\s*grid', text, re.IGNORECASE)
+    if not grid_match:
+        grid_match = re.search(r'(?:grid|is|has)\s*(\d+)\s*x\s*(\d+)', text, re.IGNORECASE)
     if grid_match:
         rows, cols = int(grid_match.group(1)), int(grid_match.group(2))
     else:
@@ -207,11 +209,16 @@ def _parse_captcha_reasoning(text):
     contains_indices = set()
     lines = text.split('\n')
     for line in lines:
-        match = re.search(r'[Rr]ow\s*(\d+)\s*[;,:]\s*[Cc]ol(?:umn)?\s*(\d+)', line)
-        if not match:
-            match = re.search(r'[Rr]ow\s*(\d+)\s*[;,:].*?[Cc]ol(?:umn)?\s*(\d+)', line)
+        match = re.search(r'[Rr]ow\s*(\d+)\s*[;,:].*?[Cc]ol(?:umn)?\s*(\d+)', line)
         if match:
             r, c = int(match.group(1)) - 1, int(match.group(2)) - 1
+            if 0 <= r < rows and 0 <= c < cols and re.search(r'\(Contains', line, re.IGNORECASE):
+                idx = r * cols + c
+                contains_indices.add(idx)
+            continue
+        match = re.search(r'[Cc]ell\s*\((\d+)\s*[,;:]\s*(\d+)\)', line)
+        if match:
+            r, c = int(match.group(1)), int(match.group(2))
             if 0 <= r < rows and 0 <= c < cols and re.search(r'\(Contains', line, re.IGNORECASE):
                 idx = r * cols + c
                 contains_indices.add(idx)
@@ -223,14 +230,20 @@ def _parse_captcha_reasoning(text):
 
     contains_indices = set()
     for line in lines:
-        if re.search(r'\(Contains', line, re.IGNORECASE):
-            col_match = re.search(r'[Cc]ol(?:umn)?\s*(\d+)', line)
-            row_match = re.search(r'[Rr]ow\s*(\d+)', line)
-            if col_match and row_match:
-                r, c = int(row_match.group(1)) - 1, int(col_match.group(2)) - 1
-                if 0 <= r < rows and 0 <= c < cols:
-                    idx = r * cols + c
-                    contains_indices.add(idx)
+        if not re.search(r'\(Contains', line, re.IGNORECASE):
+            continue
+        col_match = re.search(r'[Cc]ol(?:umn)?\s*(\d+)', line)
+        row_match = re.search(r'[Rr]ow\s*(\d+)', line)
+        if col_match and row_match:
+            r, c = int(row_match.group(1)) - 1, int(col_match.group(2)) - 1
+            if 0 <= r < rows and 0 <= c < cols:
+                contains_indices.add(r * cols + c)
+            continue
+        cell_match = re.search(r'[Cc]ell\s*\((\d+)\s*[,;:]\s*(\d+)\)', line)
+        if cell_match:
+            r, c = int(cell_match.group(1)), int(cell_match.group(2))
+            if 0 <= r < rows and 0 <= c < cols:
+                contains_indices.add(r * cols + c)
 
     if contains_indices:
         result = {"tiles": sorted(list(contains_indices)), "grid": {"cols": cols, "rows": rows}}

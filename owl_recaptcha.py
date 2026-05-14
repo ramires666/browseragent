@@ -190,14 +190,28 @@ def _get_tiles(page):
 
 
 def _extract_tile_indices(result):
-    """Ищет в ответе LLM любые индексы плиток (tiles, tile_indices, bicycle_indices, ...)."""
+    """Ищет в ответе LLM любые индексы плиток.
+    Принимает: [0,3,6] (flat), [[0,0],[0,3],[1,2]] (row,col), ["0","3","6"] (str)."""
     if not result:
         return None
     for key, val in result.items():
-        if isinstance(val, list) and len(val) > 0:
-            if all(isinstance(v, int) and 0 <= v <= 48 for v in val):
-                print(f"[RECAPTCHA] найдены индексы в поле '{key}': {val}")
-                return val
+        if not isinstance(val, list) or len(val) == 0:
+            continue
+
+        if all(isinstance(v, int) and 0 <= v <= 48 for v in val):
+            print(f"[RECAPTCHA] найдены flat индексы в '{key}': {val}")
+            return val
+
+        if all(isinstance(v, str) and v.isdigit() for v in val):
+            as_int = [int(v) for v in val]
+            print(f"[RECAPTCHA] найдены str индексы в '{key}': {as_int}")
+            return as_int
+
+        if all(isinstance(v, (list, tuple)) and len(v) == 2 and all(isinstance(x, int) for x in v) for v in val):
+            flat = [r * 8 + c for r, c in val]  # 8 = max cols
+            print(f"[RECAPTCHA] найдены [row,col] пары в '{key}': {val} -> flat={flat}")
+            return flat
+
     return None
 
 

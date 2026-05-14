@@ -191,12 +191,32 @@ def _get_tiles(page):
 
 def _extract_tile_indices(result):
     """Ищет в ответе LLM любые индексы плиток.
-    Принимает: [0,3,6] (flat), [[0,0],[0,3],[1,2]] (row,col), ["0","3","6"] (str)."""
+    Принимает: [0,3,6] (flat), [[0,0],[0,3],[1,2]] (row,col), ["0","3","6"] (str),
+    [{"row":1,"col":2},...] (dicts), {"tiles":[0,3,6]} (ключ 'tiles')."""
     if not result:
         return None
+
+    def _is_dimension_pair(lst):
+        return len(lst) == 2 and all(isinstance(v, int) and v >= 2 and v <= 8 for v in lst)
+
     for key, val in result.items():
         if not isinstance(val, list) or len(val) == 0:
             continue
+
+        if _is_dimension_pair(val):
+            continue
+
+        if all(isinstance(v, dict) and "row" in v and "col" in v for v in val):
+            cols = result.get("cols")
+            if not cols:
+                dims = result.get("grid_dimensions") or result.get("dims")
+                if isinstance(dims, list) and len(dims) == 2:
+                    _, cols = dims[0], dims[1]
+                else:
+                    cols = 4
+            flat = [(int(v["row"]) - 1) * cols + (int(v["col"]) - 1) for v in val]
+            print(f"[RECAPTCHA] найдены row/col dicts в '{key}': {flat}")
+            return flat
 
         if all(isinstance(v, int) and 0 <= v <= 48 for v in val):
             print(f"[RECAPTCHA] найдены flat индексы в '{key}': {val}")
@@ -208,7 +228,7 @@ def _extract_tile_indices(result):
             return as_int
 
         if all(isinstance(v, (list, tuple)) and len(v) == 2 and all(isinstance(x, int) for x in v) for v in val):
-            flat = [r * 8 + c for r, c in val]  # 8 = max cols
+            flat = [r * 8 + c for r, c in val]
             print(f"[RECAPTCHA] найдены [row,col] пары в '{key}': {val} -> flat={flat}")
             return flat
 

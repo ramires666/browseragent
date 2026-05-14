@@ -184,6 +184,31 @@ def _get_tiles(page):
         return None
 
 
+def _tiles_to_clicks(raw_tiles, bframe_box, page):
+    """Преобразует tile индексы (0-8 для 3x3) в viewport координаты кликов.
+    Поддерживает и старый формат [{"x":...,"y":...}] для обратной совместимости."""
+    if not raw_tiles:
+        return []
+
+    old_format = isinstance(raw_tiles[0], dict)
+    if old_format:
+        return _dedup_coords(raw_tiles, threshold=20)
+
+    tiles = _get_tiles(page)
+    if not tiles:
+        print("[RECAPTCHA] tiles_to_clicks: не могу получить плитки, возвращаю индексы как есть")
+        return [{"x": int(bframe_box["x"]) + 50 + (i % 3) * 100, "y": int(bframe_box["y"]) + 50 + (i // 3) * 100}
+                for i in raw_tiles]
+
+    result = []
+    for idx in raw_tiles:
+        if 0 <= idx < len(tiles):
+            result.append({"x": tiles[idx]["x"], "y": tiles[idx]["y"], "index": idx})
+        else:
+            print(f"[RECAPTCHA] tiles_to_clicks: индекс {idx} вне диапазона (0-{len(tiles)-1})")
+    return result
+
+
 def _snap_to_grid(coords, bframe_box, page):
     if not coords:
         return coords
@@ -356,28 +381,26 @@ def solve(page, max_rounds=5):
             _random_delay(0.5, 1)
             continue
 
-        raw_clicks = result.get("clicks", [])
-        if not raw_clicks:
-            print("[RECAPTCHA] Нет кликов")
+        raw_tiles = result.get("tiles", result.get("clicks", [])) or []
+        if not raw_tiles:
+            print("[RECAPTCHA] Нет совпавших плиток/кликов")
             skip_btn = _get_skip_button(page)
             if skip_btn:
                 click_human_like(page, skip_btn[0], skip_btn[1])
             _random_delay(0.5, 1)
             continue
 
-        clicks_data = _snap_to_grid(raw_clicks, bframe_box, page)
-        print(f"[RECAPTCHA] Координаты: {len(raw_clicks)} raw -> {len(clicks_data)} после snap+dedup")
+        clicks_data = _tiles_to_clicks(raw_tiles, bframe_box, page)
+        print(f"[RECAPTCHA] Совпало плиток: {len(clicks_data)}")
         for i, pt in enumerate(clicks_data):
-            sx, sy = pt["x"], pt["y"]
-            vx, vy = int(bframe_box["x"] + sx), int(bframe_box["y"] + sy)
-            print(f"    {i+1}: screenshot({sx},{sy}) -> viewport({vx},{vy})")
+            vx, vy = pt["x"], pt["y"]
+            print(f"    {i+1}: viewport({vx},{vy})")
 
         _wait_step("КЛИКИ ПО ПЛИТКАМ", f"{len(clicks_data)} кликов")
         for i, pt in enumerate(clicks_data):
-            sx, sy = pt.get("x", 0), pt.get("y", 0)
-            vx, vy = int(bframe_box["x"] + sx), int(bframe_box["y"] + sy)
-            print(f"[RECAPTCHA] Клик {i+1}/{len(clicks_data)} -> ({vx}, {vy})")
-            click_human_like(page, vx, vy)
+            cx, cy = pt.get("x", 0), pt.get("y", 0)
+            print(f"[RECAPTCHA] Клик {i+1}/{len(clicks_data)} -> ({cx}, {cy})")
+            click_human_like(page, cx, cy)
             if _debug():
                 _wait_step(f"КЛИК {i+1}")
             else:

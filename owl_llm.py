@@ -124,7 +124,7 @@ Return ONLY the corrected JSON, no explanations."""
             {"role": "user", "content": fix_prompt}
         ],
         "temperature": 0.0,
-        "max_tokens": 2000,
+        "max_tokens": 4000,
         "stream": False,
     }
 

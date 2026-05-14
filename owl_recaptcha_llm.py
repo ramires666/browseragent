@@ -13,12 +13,21 @@ IMPORTANT: Output ONLY raw JSON. Do NOT include thinking, reasoning, explanation
 Your job:
 1. Read the challenge instruction (e.g. "select all squares with traffic lights" or "select all images with a fire hydrant")
 2. Look at EVERY image in the grid carefully
-3. Return the (x, y) pixel center of EVERY tile that matches
+3. Return the TILE INDEX (0-based) of EVERY tile that matches
 
-The screenshot size (width x height) is provided below. Coordinates are in screenshot pixels, (0,0) = top-left.
+Tiles are indexed row-by-row, left-to-right, top-to-bottom:
+- Row 0: indices 0, 1, 2, ...
+- Row 1: indices N, N+1, N+2, ... (where N = number of columns)
+- etc.
+
+The grid can be 3x3, 4x4, 3x4, or 4x3. Always count tiles in the visible grid and index them:
+- 3x3 grid: indices 0-8
+- 4x4 grid: indices 0-15
+- 3x4 grid (3 rows, 4 cols): indices 0-11
+- 4x3 grid (4 rows, 3 cols): indices 0-11
 
 Return exactly this JSON format:
-{"clicks":[{"x":100,"y":80},{"x":280,"y":80},{"x":100,"y":200}],"reason":"these 3 contain fire hydrant"}
+{"tiles":[0,3,6],"reason":"top-left, middle-left, and bottom-left have the target"}
 
 CRITICAL RULES FOR SPLIT-OBJECT CHALLENGES:
 - The target object may be SPLIT across multiple adjacent tiles (like a puzzle).
@@ -27,8 +36,7 @@ CRITICAL RULES FOR SPLIT-OBJECT CHALLENGES:
   the adjacent tile probably also contains a fragment.
 - Example: one bus might be spread across 4 tiles — ALL 4 must be selected.
 - Missing a tile that contains a small piece of the object = FAIL.
-- Click COORDINATES must be DISTINCT for each tile (different x,y each time).
-- If no tiles match: {"clicks":[],"skip":true,"reason":"none match"}
+- If no tiles match: {"tiles":[],"skip":true,"reason":"none match"}
 - If green checkmark visible (already solved): {"done":true}
 - If tiles are unclear/blurry: {"skip":true}
 - Return ONLY valid JSON.
@@ -170,9 +178,6 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
     with open(screenshot_path, "rb") as f:
         image_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-    w = int(bframe_box["width"])
-    h = int(bframe_box["height"])
-
     payload = {
         "model": "gui-owl",
         "messages": [
@@ -183,10 +188,8 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
                     {
                         "type": "text",
                         "text": (
-                            f"Screenshot size: {w}x{h} pixels.\n"
                             f"Challenge: \"{challenge_text}\"\n\n"
-                            "List the (x,y) center of EVERY matching tile. "
-                            "Each tile must have DIFFERENT coordinates."
+                            "List the TILE INDEX (0-8 for 3x3) of EVERY matching tile."
                         )
                     },
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}

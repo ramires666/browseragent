@@ -15,13 +15,24 @@ If done: {"done":true}"""
 
 
 def _extract_json(raw):
-    brace = raw.find("{")
-    if brace < 0:
-        return None
-    trimmed = raw[brace:]
-    close = trimmed.rfind("}")
-    if close >= 0:
-        trimmed = trimmed[:close + 1]
+    trimmed = raw.strip()
+    if trimmed.startswith("["):
+        close = trimmed.rfind("]")
+        if close >= 0:
+            trimmed = trimmed[:close + 1]
+    elif trimmed.startswith("{"):
+        close = trimmed.rfind("}")
+        if close >= 0:
+            trimmed = trimmed[:close + 1]
+    else:
+        brace = trimmed.find("{")
+        if brace >= 0:
+            trimmed = trimmed[brace:]
+            close = trimmed.rfind("}")
+            if close >= 0:
+                trimmed = trimmed[:close + 1]
+        else:
+            return None
     try:
         return json.loads(trimmed)
     except json.JSONDecodeError:
@@ -123,6 +134,34 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
         if reasoning:
             print(f"[RECAPTCHA] Reasoning parsed: tiles={reasoning['tiles']} grid={reasoning['grid_cols']}x{reasoning['grid_rows']}")
             return reasoning, raw
+
+        print("[RECAPTCHA] Невалидный ответ, отправляю на коррекцию...")
+        correction = (
+            f"Your response was not in the required format. I need JSON with 'clicks' array.\n"
+            f"Your response: {raw[:1000]}\n\n"
+            f"Return ONLY this exact JSON format:\n"
+            f"{{\"clicks\":[{{\"x\":100,\"y\":200}},{{\"x\":300,\"y\":200}}],\"reason\":\"why\"}}"
+        )
+        payload["messages"].append({"role": "assistant", "content": raw[:1500]})
+        payload["messages"].append({"role": "user", "content": correction})
+        try:
+            r2 = requests.post(API_URL, json=payload, headers=headers, timeout=180)
+            print(f"[RECAPTCHA RETRY STATUS] {r2.status_code}")
+            r2.raise_for_status()
+            raw2 = (r2.json()["choices"][0]["message"].get("content") or "").strip()
+            if not raw2:
+                raw2 = (r2.json()["choices"][0]["message"].get("reasoning_content") or "").strip()
+            print(f"[RECAPTCHA RETRY RAW] {raw2[:500]}")
+            if raw2:
+                parsed2 = _extract_json(raw2)
+                if parsed2:
+                    norm2 = _normalize_result(parsed2)
+                    if norm2:
+                        print("[RECAPTCHA] Коррекция успешна!")
+                        return norm2, None
+        except Exception as e2:
+            print(f"[RECAPTCHA] Ошибка коррекции: {e2}")
+
         return None, raw
     except Exception as e:
         print(f"[RECAPTCHA] Ошибка: {e}")

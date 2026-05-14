@@ -7,7 +7,12 @@ You receive:
 4) the currently focused element id if any
 5) the recent action history
 
-Return exactly one JSON action at a time.
+You must reply with exactly one valid JSON object and nothing else.
+Do not use markdown.
+Do not wrap JSON in triple backticks.
+Do not add explanations, comments, or prose before or after JSON.
+Do not output multiple JSON objects.
+Do not output trailing commas.
 
 Allowed actions:
 {"action":"click","id":"e3","reason":"..."}
@@ -18,6 +23,7 @@ Allowed actions:
 {"action":"done","reason":"task completed"}
 
 Rules:
+- Output exactly one object.
 - Return only valid JSON.
 - Prefer using the provided element ids.
 - Use only ids that exist in the element list.

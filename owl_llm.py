@@ -105,7 +105,30 @@ Visible interactive elements:
         ],
         "temperature": 0.1,
         "max_tokens": 300,
-        "stream": False
+        "stream": False,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "browser_action",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["click", "type", "press", "goto", "wait", "done"]
+                        },
+                        "id": {"type": "string"},
+                        "text": {"type": "string"},
+                        "key": {"type": "string"},
+                        "url": {"type": "string"},
+                        "seconds": {"type": "number"},
+                        "reason": {"type": "string"}
+                    },
+                    "required": ["action"],
+                    "additionalProperties": False
+                }
+            }
+        }
     }
 
     headers = {}

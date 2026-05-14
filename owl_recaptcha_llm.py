@@ -23,6 +23,7 @@ def _llm_request(payload):
     headers = {}
     if API_KEY:
         headers["Authorization"] = f"Bearer {API_KEY}"
+    raw = None
     try:
         r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
         print(f"[RECAPTCHA STATUS] {r.status_code}")
@@ -33,21 +34,23 @@ def _llm_request(payload):
             raw = (data["choices"][0]["message"].get("reasoning_content") or "").strip()
         print(f"[RECAPTCHA RAW] {raw[:300]}")
         if not raw:
-            return None
+            return None, raw
         brace = raw.find("{")
         if brace >= 0:
-            raw = raw[brace:]
-        close = raw.rfind("}")
+            raw_trimmed = raw[brace:]
+        else:
+            raw_trimmed = raw
+        close = raw_trimmed.rfind("}")
         if close >= 0:
-            raw = raw[:close + 1]
-        result = json.loads(raw)
+            raw_trimmed = raw_trimmed[:close + 1]
+        result = json.loads(raw_trimmed)
         if not isinstance(result, dict) or "clicks" not in result:
             print(f"[RECAPTCHA] Нет поля 'clicks' в ответе")
-            return None
-        return result
+            return None, raw
+        return result, raw
     except Exception as e:
         print(f"[RECAPTCHA] Ошибка: {e}")
-        return None
+        return None, raw
 
 
 def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
@@ -66,13 +69,23 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
         "max_tokens": 4000,
         "stream": False,
     }
-    result = _llm_request(payload)
-    if not result:
-        print("[RECAPTCHA] Невалидный ответ, пробую ещё раз с correction...")
-        payload["messages"].append({"role": "assistant", "content": json.dumps(result) if result else "wrong format"})
-        payload["messages"].append({"role": "user", "content": "Return ONLY {\"clicks\":[{\"x\":100,\"y\":200}],\"reason\":\"...\"}"})
-        result = _llm_request(payload)
-    return result
+
+    for attempt in range(5):
+        result, raw = _llm_request(payload)
+        if result:
+            return result
+        print(f"[RECAPTCHA] Попытка {attempt+1}: невалидный формат, отправляю на доработку...")
+        correction = (
+            f"Your response was NOT valid JSON with 'clicks' field.\n"
+            f"Your raw response:\n{raw}\n\n"
+            f"Return ONLY this exact format with pixel coordinates:\n"
+            f"{{\"clicks\":[{{\"x\":100,\"y\":200}},{{\"x\":300,\"y\":200}}],\"reason\":\"why\"}}"
+        )
+        payload["messages"].append({"role": "assistant", "content": raw or "no response"})
+        payload["messages"].append({"role": "user", "content": correction})
+
+    print("[RECAPTCHA] 5 попыток — не удалось получить корректный JSON")
+    return None
 
 
 def find_challenge_via_screenshot(page, full_screenshot_path):
@@ -93,7 +106,7 @@ def find_challenge_via_screenshot(page, full_screenshot_path):
         "max_tokens": 500,
         "stream": False,
     }
-    result = _llm_request(payload)
+    result, _ = _llm_request(payload)
     return result and result.get("found")
 
 

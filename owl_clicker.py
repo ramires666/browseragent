@@ -14,6 +14,31 @@ _has_cyrillic = lambda t: any(0x0400 < ord(c) < 0x0500 for c in t)
 
 _user32 = ctypes.windll.user32
 
+_SAVED_CURSOR = None
+
+
+def _save_cursor():
+    global _SAVED_CURSOR
+    _SAVED_CURSOR = pyautogui.position()
+
+
+def _restore_cursor():
+    if _SAVED_CURSOR:
+        pyautogui.moveTo(_SAVED_CURSOR.x, _SAVED_CURSOR.y, duration=0.02)
+
+
+def _move_from_saved(dest_x, dest_y, duration=0.15):
+    """Телепорт обратно на сохранённую позицию, затем human-like movement к цели."""
+    _restore_cursor()
+    time.sleep(0.05)
+    pyautogui.moveTo(
+        dest_x + random.randint(-40, 40),
+        dest_y + random.randint(-40, 40),
+        duration=random.uniform(duration * 0.6, duration * 1.2)
+    )
+    pyautogui.moveTo(dest_x, dest_y, duration=random.uniform(duration * 0.4, duration * 0.8))
+    _save_cursor()
+
 
 def _set_keyboard_layout(layout_hex):
     """Переключает раскладку клавиатуры через Windows API."""
@@ -96,21 +121,14 @@ def click_fallback(page, vx, vy):
 
 
 def click_human_like(page, vx, vy):
-    """Человекоподобный клик pyautogui: jitter + кривая траектория + случайная задержка.
-    Перед кликом принудительно фокусит окно браузера через клик по заголовку."""
+    """Человекоподобный клик pyautogui: jitter + кривая траектория + случайная задержка."""
     _ensure_browser_focus(page)
     jx = random.randint(-3, 3)
     jy = random.randint(-3, 3)
     sx, sy = viewport_to_screen(page, vx + jx, vy + jy)
     dest_x = sx + random.randint(-2, 2)
     dest_y = sy + random.randint(-2, 2)
-
-    pyautogui.moveTo(
-        dest_x + random.randint(-50, 50),
-        dest_y + random.randint(-50, 50),
-        duration=random.uniform(0.1, 0.25)
-    )
-    pyautogui.moveTo(dest_x, dest_y, duration=random.uniform(0.08, 0.2))
+    _move_from_saved(dest_x, dest_y)
     time.sleep(random.uniform(0.05, 0.15))
     pyautogui.click()
     time.sleep(random.uniform(0.15, 0.35))

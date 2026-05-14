@@ -487,6 +487,8 @@ def main():
         playwright, browser, page = create_browser(headless=False)
         load_cookies(page)
         page.goto("https://www.google.com", wait_until="domcontentloaded")
+        from owl_clicker import _save_cursor
+        _save_cursor()
 
         for step in range(20):
             print(f"\n========== STEP {step + 1} ==========")

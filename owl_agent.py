@@ -8,7 +8,6 @@ from owl_browser import (
     close_browser,
     annotate_and_extract_elements,
     get_focused_id,
-    resolve_locator
 )
 from owl_llm import ask_model, SCREENSHOT_PATH
 from owl_clicker import (
@@ -278,55 +277,40 @@ def do_action(page, action, elements):
 
     if kind == "click":
         el_id = action["id"]
-        try:
-            locator = resolve_locator(page, el_id)
-            locator.wait_for(state="visible", timeout=5000)
-            locator.click(timeout=5000)
-        except Exception as e:
-            print(f"[FALLBACK] Playwright click failed: {e}")
-            coords = find_element_coords(elements, el_id)
-            if coords:
-                click_fallback(page, coords[0], coords[1])
-                print(f"[FALLBACK] pyautogui click at viewport ({coords[0]}, {coords[1]})")
-            else:
-                print(f"[FALLBACK] Element {el_id} not in DOM list — пробую vision fallback...")
-                ok = vision_fallback(page, action, elements, action_label=f"click {el_id}")
-                if not ok:
-                    print(f"[FALLBACK] Vision не помогла — ошибка")
-                    raise
+        coords = find_element_coords(elements, el_id)
+        if coords:
+            print(f"[PYAUTOGUI] click {el_id} at viewport ({coords[0]}, {coords[1]})")
+            click_human_like(page, coords[0], coords[1])
+        else:
+            print(f"[PYAUTOGUI] Element {el_id} not in DOM — vision fallback...")
+            ok = vision_fallback(page, action, elements, action_label=f"click {el_id}")
+            if not ok:
+                print(f"[PYAUTOGUI] Vision не помогла — ошибка")
+                raise
         return False
 
     if kind == "type":
         el_id = action["id"]
         text = action["text"]
-        try:
-            locator = resolve_locator(page, el_id)
-            locator.wait_for(state="visible", timeout=5000)
-            locator.fill(text, timeout=5000)
-        except Exception as e:
-            print(f"[FALLBACK] Playwright type failed: {e}")
-            coords = find_element_coords(elements, el_id)
-            if coords:
-                click_fallback(page, coords[0], coords[1])
+        coords = find_element_coords(elements, el_id)
+        if coords:
+            print(f"[PYAUTOGUI] type into {el_id} at viewport ({coords[0]}, {coords[1]})")
+            click_human_like(page, coords[0], coords[1])
+            type_fallback(page, text)
+        else:
+            print(f"[PYAUTOGUI] Element {el_id} not in DOM — vision fallback...")
+            ok = vision_fallback(page, action, elements, action_label=f"type into {el_id}")
+            if ok:
                 type_fallback(page, text)
-                print(f"[FALLBACK] pyautogui type at viewport ({coords[0]}, {coords[1]})")
             else:
-                print(f"[FALLBACK] Element {el_id} not in DOM list — пробую vision fallback...")
-                ok = vision_fallback(page, action, elements, action_label=f"type into {el_id}")
-                if ok:
-                    type_fallback(page, text)
-                else:
-                    print(f"[FALLBACK] Vision не помогла — ошибка")
-                    raise
+                print(f"[PYAUTOGUI] Vision не помогла — ошибка")
+                raise
         return False
 
     if kind == "press":
         key = action["key"]
-        try:
-            page.keyboard.press(key)
-        except Exception as e:
-            print(f"[FALLBACK] Playwright press failed: {e}")
-            press_fallback(page, key)
+        print(f"[PYAUTOGUI] press '{key}'")
+        press_fallback(page, key)
         return False
 
     if kind == "wait":

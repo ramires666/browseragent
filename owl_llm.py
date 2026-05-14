@@ -11,7 +11,7 @@ API_URL = os.getenv("API_URL", "http://127.0.0.1:8080/v1/chat/completions")
 SCREENSHOT_PATH = os.getenv("SCREENSHOT_PATH", r"W:\_python\OWL\browser_screen.jpg")
 SYSTEM_PROMPT_PATH = os.getenv("SYSTEM_PROMPT_PATH", "system_prompt.txt")
 JSON_SCHEMA_ENABLED = os.getenv("JSON_SCHEMA_ENABLED", "").lower() in ("1", "true", "yes")
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "800"))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "4000"))
 
 _SYSTEM_PROMPT_HARDCODED = """\
 You are a browser automation agent.
@@ -105,6 +105,48 @@ def build_history_text(history):
     return "\n".join(lines) if lines else "No history yet."
 
 
+def _ask_model_to_fix_json(bad_text):
+    """Просит модель извлечь валидный JSON из своего же некорректного ответа."""
+    import requests as req
+    fix_prompt = f"""The following text was supposed to be valid JSON but is not. Extract ONLY the valid JSON part. If there is no valid JSON, try to fix it by completing it properly.
+
+Text:
+```
+{bad_text[:2000]}
+```
+
+Return ONLY the corrected JSON, no explanations."""
+
+    payload = {
+        "model": "gui-owl",
+        "messages": [
+            {"role": "system", "content": "You extract and fix JSON. Return ONLY valid JSON."},
+            {"role": "user", "content": fix_prompt}
+        ],
+        "temperature": 0.0,
+        "max_tokens": 1000,
+        "stream": False,
+    }
+
+    headers = {}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
+
+    try:
+        r = req.post(API_URL, json=payload, headers=headers, timeout=120)
+        r.raise_for_status()
+        msg = r.json()["choices"][0]["message"]
+        fixed = (msg.get("content") or msg.get("reasoning_content") or "").strip()
+        brace = fixed.find("{")
+        if brace >= 0:
+            fixed = fixed[brace:]
+        json.loads(fixed)
+        return fixed
+    except Exception as e:
+        print(f"[REPAIR MODEL] ошибка: {e}")
+        return ""
+
+
 def ask_model(task, screenshot_path, elements, current_url, current_title, focused_id, history):
     with open(screenshot_path, "rb") as f:
         image_b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -174,12 +216,39 @@ Visible interactive elements:
 
     r = requests.post(API_URL, json=payload, headers=headers, timeout=180)
     print("[MODEL STATUS]", r.status_code)
-    print("[MODEL BODY]", r.text)
     r.raise_for_status()
     data = r.json()
-    raw = data["choices"][0]["message"]["content"]
+    msg = data["choices"][0]["message"]
+    raw = (msg.get("content") or "").strip()
+    if not raw:
+        raw = (msg.get("reasoning_content") or "").strip()
+        if raw:
+            print("[MODEL] content пустой, использую reasoning_content")
+
+    print("[MODEL RAW]", raw[:500])
+
+    if not raw:
+        print("[ERROR] Модель вернула пустой ответ")
+        print("[MODEL BODY]", r.text[:500])
+        return ""
+
+    brace = raw.find("{")
+    if brace > 0:
+        raw = raw[brace:]
+
     repaired = repair_json(raw)
     if repaired != raw:
         print("[REPAIR JSON] было:", raw[-100:])
         print("[REPAIR JSON] стало:", repaired[-100:])
-    return repaired
+
+    try:
+        json.loads(repaired)
+        return repaired
+    except json.JSONDecodeError:
+        print("[REPAIR JSON] даже repair_json не помог. Прошу модель исправить...")
+        fixed = _ask_model_to_fix_json(raw)
+        if fixed:
+            print("[REPAIR JSON] модель исправила:", fixed[:200])
+            return fixed
+        print("[REPAIR JSON] модель не смогла исправить, возвращаю как есть")
+        return repaired

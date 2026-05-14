@@ -475,6 +475,14 @@ def solve(page, max_rounds=5):
             return False
         bframe_el.screenshot(path=RECAPTCHA_SCREENSHOT_PATH, type="jpeg", quality=95)
 
+        from PIL import Image
+        with Image.open(RECAPTCHA_SCREENSHOT_PATH) as img:
+            shot_w, shot_h = img.size
+        css_w, css_h = int(bframe_box["width"]), int(bframe_box["height"])
+        scale = max(1.0, shot_w / css_w) if css_w > 0 else 1.0
+        if abs(scale - 1.0) > 0.01:
+            print(f"[RECAPTCHA] скриншот {shot_w}x{shot_h} vs CSS {css_w}x{css_h}, scale={scale:.2f}")
+
         print(f">>> ОТПРАВЛЯЮ ЗАПРОС В LLM challenge: \"{challenge_text}\"")
         result, raw = ask_llm_for_clicks(challenge_text, RECAPTCHA_SCREENSHOT_PATH, bframe_box)
 
@@ -486,6 +494,8 @@ def solve(page, max_rounds=5):
 
         print(f"[RECAPTCHA] ОТВЕТ LLM: {json.dumps(result, ensure_ascii=False, indent=2)}")
         _wait_step("ОТВЕТ LLM")
+        if isinstance(result, dict):
+            result["_scale"] = scale
 
         if result.get("done"):
             print("[RECAPTCHA] LLM: уже решено")
@@ -502,6 +512,7 @@ def solve(page, max_rounds=5):
         raw_clicks = result.get("clicks") or []
         tiles = result.get("tiles") or []
         clicks_data = []
+        scale = result.get("_scale", 1.0)
 
         if raw_clicks:
             bw = int(bframe_box["width"])
@@ -522,12 +533,12 @@ def solve(page, max_rounds=5):
                     print(f"[RECAPTCHA] клик {i} с некорректными координатами: {pt}, пропускаю")
                     continue
                 if fx > bw or fy > bh:
-                    print(f"[RECAPTCHA] коорд ({fx},{fy}) ВНЕ iframe ({bw}x{bh}) — использую как viewport без сдвига")
+                    print(f"[RECAPTCHA] коорд ({fx},{fy}) ВНЕ iframe ({bw}x{bh}) — использую как viewport")
                     vx, vy = int(fx), int(fy)
                 else:
-                    vx = int(bframe_box["x"] + fx)
-                    vy = int(bframe_box["y"] + fy)
-                print(f"[RECAPTCHA] клик({fx},{fy}) -> viewport({vx},{vy})")
+                    vx = int(bframe_box["x"] + fx / scale)
+                    vy = int(bframe_box["y"] + fy / scale)
+                print(f"[RECAPTCHA] клик({fx},{fy}) {'*1/scale=' + str(round(1/scale,2)) if scale != 1.0 else ''} -> viewport({vx},{vy})")
                 clicks_data.append({"x": vx, "y": vy})
         elif tiles:
             cols = result.get("grid_cols", 3)

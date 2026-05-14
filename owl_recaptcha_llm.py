@@ -2,7 +2,8 @@ import json
 import os
 import base64
 import requests
-from owl_llm import API_URL, API_KEY
+import re
+from owl_llm import API_URL, API_KEY, _ask_model_to_fix_json
 
 RECAPTCHA_SYSTEM_PROMPT = """
 You are solving a reCAPTCHA image challenge. Look at the screenshot: it shows a grid of square images and a challenge instruction at the top.
@@ -107,6 +108,7 @@ def _llm_request(payload, label):
         if not raw:
             print(f"[{label}] Пустой ответ модели")
             return None
+
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
@@ -122,6 +124,9 @@ def _llm_request(payload, label):
         brace_start = raw.find("{")
         if brace_start >= 0:
             json_part = raw[brace_start:]
+            close = json_part.rfind("}")
+            if close >= 0:
+                json_part = json_part[:close + 1]
             try:
                 return json.loads(json_part)
             except json.JSONDecodeError:
@@ -134,7 +139,6 @@ def _llm_request(payload, label):
 
         print(f"[{label}] Невалидный JSON: {raw[:300]}")
         print(f"[{label}] Полный ответ ({len(raw)} символов), ищу JSON...")
-        import re
         json_matches = re.findall(r'\{[^{}]*\}', raw, re.DOTALL)
         for m in json_matches:
             try:
@@ -145,6 +149,14 @@ def _llm_request(payload, label):
         for m in longer:
             try:
                 return json.loads(m)
+            except json.JSONDecodeError:
+                pass
+
+        print(f"[{label}] Пытаюсь _ask_model_to_fix_json...")
+        fixed = _ask_model_to_fix_json(raw)
+        if fixed:
+            try:
+                return json.loads(fixed)
             except json.JSONDecodeError:
                 pass
 
@@ -182,7 +194,7 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
             }
         ],
         "temperature": 0.1,
-        "max_tokens": 2500,
+        "max_tokens": 4000,
         "stream": False,
     }
 
@@ -211,7 +223,7 @@ def find_challenge_via_screenshot(page, full_screenshot_path):
             }
         ],
         "temperature": 0.1,
-        "max_tokens": 2500,
+        "max_tokens": 4000,
         "stream": False,
     }
 

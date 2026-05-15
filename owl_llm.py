@@ -118,7 +118,6 @@ Text:
 Return ONLY the corrected JSON, no explanations."""
 
     payload = {
-        "model": "gui-owl",
         "messages": [
             {"role": "system", "content": "You extract and fix JSON. Return ONLY valid JSON."},
             {"role": "user", "content": fix_prompt}
@@ -169,7 +168,6 @@ Visible interactive elements:
 """
 
     payload = {
-        "model": "gui-owl",
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -184,8 +182,6 @@ Visible interactive elements:
         "max_tokens": MAX_TOKENS,
         "stream": False,
     }
-
-    payload["model"] = payload.get("model") or "gui-owl"
 
     if JSON_SCHEMA_ENABLED:
         payload["response_format"] = {
@@ -218,17 +214,24 @@ Visible interactive elements:
         print("[ERROR] Модель не вернула ответ")
         return ""
 
-    msg = data["choices"][0]["message"]
+    ch = data["choices"][0]
+    msg = ch.get("message", {}) or {}
     raw = (msg.get("content") or "").strip()
     if not raw:
         raw = (msg.get("reasoning_content") or "").strip()
         if raw:
             print("[MODEL] content пустой, использую reasoning_content")
+    if not raw:
+        raw = (msg.get("reasoning") or "").strip()
+        if raw:
+            print("[MODEL] content пустой, использую reasoning")
 
     print("[MODEL RAW]", raw[:500])
 
     if not raw:
         print("[ERROR] Модель вернула пустой ответ")
+        print(f"[DIAG] finish_reason={ch.get('finish_reason')} msg_keys={list(msg.keys())} usage={data.get('usage')}")
+        print(f"[DIAG] msg_dump={json.dumps(msg, ensure_ascii=False)[:1500]}")
         return ""
 
     brace = raw.find("{")

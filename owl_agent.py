@@ -201,7 +201,7 @@ def verify_action_via_screenshot(page, action):
     prompt = VISION_VERIFY_PROMPT.replace("__ACTION__", json.dumps(action, ensure_ascii=False))
 
     payload = {
-        "model": "gui-owl",
+        "model": os.getenv("LLM_MODEL", "gui-owl"),
         "messages": [
             {"role": "system", "content": prompt},
             {
@@ -283,7 +283,7 @@ def vision_fallback(page, action, elements, action_label=""):
     prompt = VISION_FALLBACK_PROMPT.replace("__ACTION__", json.dumps(action, ensure_ascii=False))
 
     payload = {
-        "model": "gui-owl",
+        "model": os.getenv("LLM_MODEL", "gui-owl"),
         "messages": [
             {"role": "system", "content": prompt},
             {

@@ -48,7 +48,7 @@ def _set_keyboard_layout(layout_hex):
 
 
 def _get_window_position(page):
-    """Возвращает словарь с screenX, screenY, outerW, outerH, innerW, innerH браузера."""
+    """Возвращает словарь с screenX, screenY, outerW, outerH, innerW, innerH, dpr браузера."""
     return page.evaluate("""() => {
         return {
             screenX: window.screenX,
@@ -56,9 +56,30 @@ def _get_window_position(page):
             outerW: window.outerWidth,
             outerH: window.outerHeight,
             innerW: window.innerWidth,
-            innerH: window.innerHeight
+            innerH: window.innerHeight,
+            dpr: window.devicePixelRatio || 1.0
         };
     }""")
+
+
+def _get_system_dpi_scale():
+    """Возвращает системный DPI-scale Windows (1.0, 1.15, 1.25, 1.5, 2.0 и т.д.).
+    На 4K-мониторах с 115% Windows-зумом возвращает 1.15.
+    pyautogui работает в ФИЗИЧЕСКИХ пикселях (когда процесс DPI-aware),
+    а Chrome отдаёт CSS-пиксели — этот множитель нужен для конвертации."""
+    try:
+        sf = ctypes.windll.shcore.GetScaleFactorForDevice(0)
+        return sf / 100.0
+    except Exception:
+        try:
+            dpi = ctypes.windll.user32.GetDpiForSystem()
+            return dpi / 96.0
+        except Exception:
+            return 1.0
+
+
+_DPI_SCALE = _get_system_dpi_scale()
+print(f"[CLICKER INIT] System DPI scale = {_DPI_SCALE}")
 
 
 def _ensure_browser_focus(page):
@@ -72,19 +93,25 @@ def _ensure_browser_focus(page):
 
 
 def viewport_to_screen(page, vx, vy):
+    """Конвертирует viewport-координаты Chrome (CSS px) в физические пиксели для pyautogui.
+    На Windows с DPI != 100% Chrome отдаёт CSS-пиксели, а pyautogui (DPI-aware процесс)
+    ожидает физические. Множитель _DPI_SCALE компенсирует это."""
     info = _get_window_position(page)
     w_diff = info["outerW"] - info["innerW"]
     h_diff = info["outerH"] - info["innerH"]
     border_w = w_diff // 2
     top_chrome = h_diff - border_w
-    sx = info["screenX"] + border_w + vx
-    sy = info["screenY"] + top_chrome + vy
-    result = int(sx), int(sy)
-    print(f"[VIEWPORT→SCREEN] viewport=({vx},{vy}) screen=({result[0]},{result[1]}) "
-          f"screenX={info['screenX']} screenY={info['screenY']} "
+    # CSS-координаты точки клика на экране
+    sx_css = info["screenX"] + border_w + vx
+    sy_css = info["screenY"] + top_chrome + vy
+    # Физические пиксели для pyautogui
+    sx = int(round(sx_css * _DPI_SCALE))
+    sy = int(round(sy_css * _DPI_SCALE))
+    print(f"[V2S] viewport=({vx},{vy}) css=({sx_css},{sy_css}) phys=({sx},{sy}) "
+          f"dpi={_DPI_SCALE} screenX={info['screenX']} screenY={info['screenY']} "
           f"outer={info['outerW']}x{info['outerH']} inner={info['innerW']}x{info['innerH']} "
-          f"border_w={border_w} top_chrome={top_chrome}")
-    return result
+          f"border_w={border_w} top_chrome={top_chrome} dpr={info.get('dpr')}")
+    return sx, sy
 
 
 def _focus_browser_window(page):
@@ -108,6 +135,16 @@ def _focus_browser_window(page):
                     time.sleep(0.3)
     except Exception:
         pass
+
+
+def preview_cursor_at(page, vx, vy):
+    """Перемещает курсор в целевую позицию без клика для визуальной проверки.
+    Возвращает (sx, sy, actual_pos) где actual_pos = pyautogui.position()."""
+    sx, sy = viewport_to_screen(page, vx, vy)
+    pyautogui.moveTo(sx, sy, duration=0.25)
+    actual = pyautogui.position()
+    print(f"[CURSOR PREVIEW] target=({sx},{sy})  actual=({actual.x},{actual.y})  delta=({actual.x-sx},{actual.y-sy})")
+    return sx, sy, actual
 
 
 def click_fallback(page, vx, vy):

@@ -3,20 +3,34 @@ import base64
 import re
 from owl_llm_client import get_config, make_request
 
-SYSTEM_PROMPT = """Look at the screenshot. Find ALL objects that match the instruction.
-Return pixel coordinates (x,y) center of each matching object.
+SYSTEM_PROMPT = """You see a screenshot of a reCAPTCHA image-selection challenge.
+The image contains a grid of tiles (usually 3x3 or 4x4).
+Find ALL tiles that match the instruction (each whole grid cell that contains the target object).
 
-IMPORTANT:
-- Use a 1000x1000 coordinate system. Think of the image as 1000x1000.
-- x and y MUST be plain numbers, NEVER arrays/lists.
-- {"x": 500, "y": 300} — CORRECT
-- {"x": [500, 300]} — WRONG, never do this
+For each matching tile, you must MEASURE its center pixel in THIS specific image and return it.
 
-FORMAT (strict JSON, no markdown, no extra text):
-{"clicks":[{"x":200,"y":300},{"x":500,"y":700}],"reason":"which objects match and why"}
+COORDINATE SYSTEM:
+- Coordinates are ACTUAL IMAGE PIXELS measured from the top-left corner of the image.
+- x is the pixel column from the left edge (0 = leftmost column).
+- y is the pixel row from the top edge (0 = topmost row).
+- Image width and height are given in the user message — your values must fit inside.
+- Return the geometric CENTER of each tile, not its corner.
 
-If no matches: {"clicks":[],"skip":true}
-If done: {"done":true}"""
+FORMAT RULES:
+- x and y MUST be plain integers, NEVER arrays/lists.
+- Do NOT normalize — never divide by 1000, never use fractions.
+- Do NOT reuse numbers from the schema below — those are placeholders, not real coords.
+
+OUTPUT SHAPE (strict JSON, no markdown, no extra text):
+{"clicks":[{"x":<int>,"y":<int>}, ...],"reason":"<short explanation>"}
+
+The <int> placeholders MUST be replaced with the real measured pixel centers
+of the matching tiles in the actual image you are looking at. Each tile gets
+its own object inside the clicks array. Different tiles have different x AND
+different y unless they share a row or column.
+
+If no tiles match: {"clicks":[],"skip":true}
+If the challenge appears already solved: {"done":true}"""
 
 
 def _extract_json(raw):
@@ -142,8 +156,8 @@ def _normalize_result(parsed):
     return None
 
 
-def _coords_look_valid(normalized, bframe_box=None):
-    """Проверяет что clicks есть и не выглядят мусором."""
+def _coords_look_valid(normalized, img_w=None, img_h=None):
+    """Проверяет что clicks есть и попадают в пределы изображения."""
     if not normalized:
         return False
     if normalized.get("done") or normalized.get("skip"):
@@ -162,9 +176,12 @@ def _coords_look_valid(normalized, bframe_box=None):
                 fx, fy = float(x), float(y)
             except (TypeError, ValueError):
                 return False
-            # В 0-1000 пространстве — должны быть > 0 и <= 1000
             if fx <= 0 and fy <= 0:
                 return False
+            if img_w and img_h:
+                # Допускаем небольшой выход за края (~5%), но не более чем в 1.5 раза
+                if fx < 0 or fy < 0 or fx > img_w * 1.5 or fy > img_h * 1.5:
+                    return False
         return True
     if "tiles" in normalized:
         return bool(normalized["tiles"])
@@ -191,11 +208,19 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
         print(f"[RECAPTCHA RAW] {raw[:500]}")
         return raw
 
+    user_text = (
+        f"Image dimensions: {img_w}x{img_h} pixels. "
+        f"Return the pixel-center (x,y) of EACH matching tile, "
+        f"using absolute pixel coordinates of THIS image "
+        f"(0 <= x <= {img_w}, 0 <= y <= {img_h}). "
+        f"Instruction: {challenge_text}"
+    )
+
     def _build_payload(correction_msg=None):
         msgs = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": [
-                {"type": "text", "text": f"Image is {img_w}x{img_h}px. Think of it as 1000x1000. Return center coords of each matching object in 0-1000 space."},
+                {"type": "text", "text": user_text},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
             ]}
         ]
@@ -218,34 +243,40 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
     parsed = _extract_json(raw)
     normalized = _normalize_result(parsed) if parsed else None
 
-    if normalized and _coords_look_valid(normalized, bframe_box):
+    if normalized and _coords_look_valid(normalized, img_w, img_h):
         print("[RECAPTCHA] Найден JSON с clicks")
         return normalized, None
 
     # Коррекция: попытка 2
     print("[RECAPTCHA] Координаты невалидны, отправляю на коррекцию...")
     correction = (
-        f"Your response had format issues. Coordinates must be plain numbers (0-1000), not arrays.\n"
+        f"Your response had format issues. "
+        f"Coordinates must be plain INTEGER pixel coordinates measured from "
+        f"the top-left of the image (valid: 0..{img_w} for x, 0..{img_h} for y). "
+        f"Not arrays. Not normalized. Not 0-1000 — actual pixels.\n"
         f"Your response: {raw[:1000]}\n\n"
-        f"Return ONLY this exact JSON:\n"
-        f"{{\"clicks\":[{{\"x\":200,\"y\":300}},{{\"x\":500,\"y\":700}}],\"reason\":\"why\"}}"
+        f"Return ONLY this JSON shape (replace <int> with your measured values):\n"
+        f"{{\"clicks\":[{{\"x\":<int>,\"y\":<int>}}, ...],\"reason\":\"<short>\"}}"
     )
     payload2 = _build_payload(correction)
     raw2 = _make_request(payload2)
     if raw2:
         parsed2 = _extract_json(raw2)
         normalized2 = _normalize_result(parsed2) if parsed2 else None
-        if normalized2 and _coords_look_valid(normalized2, bframe_box):
+        if normalized2 and _coords_look_valid(normalized2, img_w, img_h):
             print("[RECAPTCHA] Коррекция успешна!")
             return normalized2, None
 
     # Попытка 3: сброс, строгий промпт
     print("[RECAPTCHA] Повторная попытка со строгим промптом...")
     strict_prompt = (
-        f"You MUST return ONLY this exact JSON format with no extra text:\n"
-        f'{{"clicks":[{{"x":200,"y":300}},{{"x":500,"y":700}}],"reason":"why"}}\n\n'
-        f"IMPORTANT: x and y are numbers, NOT arrays. Example: {{\"x\":200,\"y\":300}} NOT {{\"x\":[200,300]}}.\n"
-        f"Image is {img_w}x{img_h}px. Use 0-1000 coordinate space."
+        f"Return ONLY this JSON shape (replace <int> with measured values):\n"
+        f'{{"clicks":[{{"x":<int>,"y":<int>}}, ...],"reason":"<short>"}}\n\n'
+        f"x and y are PLAIN INTEGERS in actual image pixel coordinates.\n"
+        f"Image is {img_w}x{img_h}px. Valid range: 0..{img_w} for x, 0..{img_h} for y.\n"
+        f"Each click is the CENTER pixel of one matching tile in THIS image.\n"
+        f"Do not invent numbers — measure each tile center directly.\n"
+        f"Instruction: {challenge_text}"
     )
     payload3 = {
         "model": _model,
@@ -264,13 +295,113 @@ def ask_llm_for_clicks(challenge_text, screenshot_path, bframe_box):
     if raw3:
         parsed3 = _extract_json(raw3)
         normalized3 = _normalize_result(parsed3) if parsed3 else None
-        if normalized3 and _coords_look_valid(normalized3, bframe_box):
+        if normalized3 and _coords_look_valid(normalized3, img_w, img_h):
             print("[RECAPTCHA] Повторная попытка успешна!")
             return normalized3, None
 
     # Ничего не сработало
     print("[RECAPTCHA] Все попытки исчерпаны")
     return normalized or normalized2 or normalized3 or None, raw or raw2 or raw3
+
+
+TILE_INDEX_PROMPT = """You are looking at a reCAPTCHA image-selection challenge.
+The grid of tiles has been overlaid with bright YELLOW CIRCLES, each containing a tile NUMBER (1, 2, 3, ...).
+The numbers appear in the top-left corner of each tile.
+
+Your task: find ALL numbered tiles whose CONTENT matches the instruction.
+
+Return ONLY a JSON object with the tile numbers, no markdown, no extra text:
+{"tiles": [<int>, <int>, ...], "reason": "<one short sentence>"}
+
+Rules:
+- Each tile is a separate grid cell. A tile matches if it contains ANY visible part of the target object.
+- Use the integer numbers visible inside the yellow circles. Numbers start at 1.
+- If no tiles match: {"tiles": [], "skip": true}
+- If the challenge looks already solved: {"done": true}
+- Never include coordinates, never include strings — only integer tile numbers.
+"""
+
+
+def ask_llm_for_tile_indices(challenge_text, annotated_image_path, num_tiles):
+    """Запрашивает у LLM номера тайлов (1..N) с пронумерованной картинки."""
+    with open(annotated_image_path, "rb") as f:
+        image_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+    _model = get_config()["model"]
+    user_text = (
+        f"Instruction: {challenge_text}\n"
+        f"The image has {num_tiles} numbered tiles (1..{num_tiles}).\n"
+        f"Return the JSON object with the matching tile numbers."
+    )
+
+    def _build_payload(extra_msg=None, temperature=0.1):
+        msgs = [
+            {"role": "system", "content": TILE_INDEX_PROMPT},
+            {"role": "user", "content": [
+                {"type": "text", "text": user_text},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+            ]},
+        ]
+        if extra_msg:
+            msgs.append({"role": "user", "content": extra_msg})
+        return {
+            "model": _model,
+            "messages": msgs,
+            "temperature": temperature,
+            "max_tokens": 800,
+            "stream": False,
+        }
+
+    def _run(payload):
+        data = make_request(payload, tag="RECAPTCHA-TILES")
+        if not data:
+            return None
+        raw = (data["choices"][0]["message"].get("content") or "").strip()
+        if not raw:
+            raw = (data["choices"][0]["message"].get("reasoning_content") or "").strip()
+        print(f"[RECAPTCHA-TILES RAW] {raw[:500]}")
+        return raw
+
+    def _parse_tiles(raw):
+        if not raw:
+            return None
+        parsed = _extract_json(raw)
+        if not isinstance(parsed, dict):
+            return None
+        if parsed.get("done"):
+            return {"done": True}
+        if parsed.get("skip"):
+            return {"skip": True, "tiles": []}
+        tiles_raw = parsed.get("tiles")
+        if not isinstance(tiles_raw, list):
+            return None
+        cleaned = []
+        for v in tiles_raw:
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= n <= num_tiles and n not in cleaned:
+                cleaned.append(n)
+        return {"tiles": cleaned, "reason": parsed.get("reason", "")}
+
+    raw = _run(_build_payload())
+    result = _parse_tiles(raw)
+    if result is not None and (result.get("done") or result.get("skip") or result.get("tiles") is not None):
+        return result, raw
+
+    correction = (
+        f"Your response was not valid. Return ONLY:\n"
+        f"{{\"tiles\": [1, 4, 7], \"reason\": \"short\"}}\n"
+        f"Replace [1, 4, 7] with the actual matching tile numbers from the image "
+        f"(integers in range 1..{num_tiles}). No coords, no strings."
+    )
+    raw2 = _run(_build_payload(correction, temperature=0.05))
+    result2 = _parse_tiles(raw2)
+    if result2 is not None:
+        return result2, raw2
+
+    return None, raw or raw2
 
 
 def find_challenge_via_screenshot(page, full_screenshot_path):

@@ -6,5 +6,15 @@ __pycache__/
 venv/
 .venv/
 browser_screen.jpg
-_recaptcha_challenge.jpg
 cookies.json
+
+# Local tool dirs
+.claude/
+.kilo/
+
+# Test/debug artefacts
+temp/
+_recaptcha_*.jpg
+_synth_*
+_test_*.jpg
+*.log
